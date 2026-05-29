@@ -1,45 +1,36 @@
 package main
 
 import (
-	"flag"
-	"log"
-	"net"
-	"net/http"
+	"fmt"
 	"os"
-	"path/filepath"
-	"strconv"
-
-	"orchid/internal/server"
-	"orchid/internal/session"
-	"orchid/internal/store"
-	"orchid/internal/tmux"
 )
 
 func main() {
-	host := flag.String("host", "127.0.0.1", "listen host (localhost only by default)")
-	port := flag.Int("port", 8081, "listen port")
-	flag.Parse()
+	os.Exit(run(os.Args[1:]))
+}
 
-	if err := tmux.Available(); err != nil {
-		log.Fatalf("orchid requires tmux: %v (install tmux and retry)", err)
-	}
-
-	addr := net.JoinHostPort(*host, strconv.Itoa(*port))
-
-	sessPath, err := store.DefaultPath()
+func run(args []string) int {
+	handler, err := route(args)
 	if err != nil {
-		cfg, _ := os.UserConfigDir()
-		sessPath = filepath.Join(cfg, "orchid", "sessions.json")
+		fmt.Fprintln(os.Stderr, "orchid:", err)
+		usage()
+		return 2
 	}
-	mgr := session.NewManager(sessPath)
-	if err := mgr.Restore(); err != nil {
-		log.Printf("orchid: restore sessions: %v", err)
-	}
-	defer mgr.KillAll()
+	return handler()
+}
 
-	h := server.New(mgr)
-	log.Printf("orchid listening on http://%s (sessions: %s)", addr, sessPath)
-	if err := http.ListenAndServe(addr, h); err != nil {
-		log.Fatal(err)
-	}
+func usage() {
+	fmt.Fprint(os.Stderr, `usage: orchid <command> [args]
+
+commands:
+  serve [-host H -port P]   run the server in the foreground
+  start [-host H -port P]   start the server as a background daemon
+  stop                      stop the daemon
+  status                    show daemon status and session count
+  open                      open the dashboard in a browser
+  ls                        list sessions
+  create <agent> [cwd]      create a session
+  rm <id>                   delete a session
+  restart <id>              restart a stopped session
+`)
 }
