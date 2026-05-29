@@ -10,7 +10,7 @@ const AGENT = {
 const agentMeta = (a) => AGENT[a] || AGENT.shell;
 const statusMeta = (s) => s === "running"
   ? { cls: "ok", label: "Running", pulse: true }
-  : { cls: "idle", label: "Idle", pulse: false };
+  : { cls: "idle", label: "Stopped", pulse: false };
 
 const MONOKAI = {
   background: "#08080b", foreground: "#f8f8f2", cursor: "#a6e22e", cursorAccent: "#08080b",
