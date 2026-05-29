@@ -13,19 +13,6 @@ func skipIfNoTmux(t *testing.T) {
 	}
 }
 
-func TestAttachArgv(t *testing.T) {
-	got := AttachArgv("orchid-abc")
-	want := []string{"tmux", "attach", "-t", "orchid-abc"}
-	if len(got) != len(want) {
-		t.Fatalf("got %v", got)
-	}
-	for i := range want {
-		if got[i] != want[i] {
-			t.Fatalf("got %v, want %v", got, want)
-		}
-	}
-}
-
 func TestSessionRoundtrip(t *testing.T) {
 	skipIfNoTmux(t)
 	name := "orchid-test-roundtrip"

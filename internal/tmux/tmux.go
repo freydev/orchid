@@ -46,8 +46,3 @@ func KillSession(name string) error {
 	}
 	return nil
 }
-
-// AttachArgv returns the argv that attaches a client to the named session.
-func AttachArgv(name string) []string {
-	return []string{"tmux", "attach", "-t", name}
-}
