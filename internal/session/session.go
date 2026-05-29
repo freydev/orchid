@@ -140,6 +140,13 @@ func (s *Session) Replay() []byte {
 	return s.ring.Snapshot()
 }
 
+// Done returns a channel that is closed when the attachment is invalidated
+// (session died or a newer subscriber kicked this one).
+func (a *attachment) Done() <-chan struct{} { return a.done }
+
+// Ch returns the channel on which PTY output bytes are delivered.
+func (a *attachment) Ch() <-chan []byte { return a.ch }
+
 func closeOnce(ch chan struct{}) {
 	select {
 	case <-ch:
