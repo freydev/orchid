@@ -48,3 +48,50 @@ func TestSessionAliveFlips(t *testing.T) {
 		}
 	}
 }
+
+func TestSessionAttachReceivesOutput(t *testing.T) {
+	s, err := newSession("test3")
+	if err != nil {
+		t.Fatalf("newSession: %v", err)
+	}
+	defer s.Close()
+
+	a := s.Attach()
+	defer s.Detach(a)
+
+	if _, err := s.Write([]byte("echo attach_marker\n")); err != nil {
+		t.Fatalf("write: %v", err)
+	}
+
+	var acc []byte
+	deadline := time.After(5 * time.Second)
+	for {
+		select {
+		case b := <-a.ch:
+			acc = append(acc, b...)
+			if bytes.Contains(acc, []byte("attach_marker")) {
+				return
+			}
+		case <-deadline:
+			t.Fatalf("marker not received; got %q", acc)
+		}
+	}
+}
+
+func TestSessionAttachKicksPrevious(t *testing.T) {
+	s, err := newSession("test4")
+	if err != nil {
+		t.Fatalf("newSession: %v", err)
+	}
+	defer s.Close()
+
+	a1 := s.Attach()
+	a2 := s.Attach() // should kick a1
+
+	select {
+	case <-a1.done: // expected
+	case <-time.After(2 * time.Second):
+		t.Fatal("previous attachment was not kicked")
+	}
+	s.Detach(a2)
+}

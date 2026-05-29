@@ -60,7 +60,7 @@ func (s *Session) readLoop() {
 	s.mu.Lock()
 	s.alive = false
 	if s.sub != nil {
-		close(s.sub.done)
+		closeOnce(s.sub.done)
 		s.sub = nil
 	}
 	s.mu.Unlock()
@@ -104,4 +104,47 @@ func (s *Session) Close() {
 			_ = s.cmd.Process.Kill()
 		}
 	})
+}
+
+// Attach registers a new live subscriber, kicking any previous one.
+// Returns nil if the session is already dead.
+func (s *Session) Attach() *attachment {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	if !s.alive {
+		return nil
+	}
+	if s.sub != nil {
+		closeOnce(s.sub.done)
+	}
+	a := &attachment{ch: make(chan []byte, 256), done: make(chan struct{})}
+	s.sub = a
+	return a
+}
+
+// Detach removes a as the current subscriber if it still is one.
+func (s *Session) Detach(a *attachment) {
+	if a == nil {
+		return
+	}
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	if s.sub == a {
+		closeOnce(s.sub.done)
+		s.sub = nil
+	}
+}
+
+// Replay returns the current scrollback snapshot for a freshly attached client.
+func (s *Session) Replay() []byte {
+	return s.ring.Snapshot()
+}
+
+func closeOnce(ch chan struct{}) {
+	select {
+	case <-ch:
+		// already closed
+	default:
+		close(ch)
+	}
 }
