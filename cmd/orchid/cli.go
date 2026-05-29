@@ -19,6 +19,7 @@ import (
 	"time"
 
 	"orchid/internal/client"
+	"orchid/internal/gitwt"
 	"orchid/internal/project"
 	"orchid/internal/runtime"
 	"orchid/internal/server"
@@ -90,6 +91,10 @@ func serveCmd(args []string) int {
 	}
 	if err := tmux.Available(); err != nil {
 		log.Printf("orchid requires tmux: %v (install tmux and retry)", err)
+		return 1
+	}
+	if err := gitwt.Available(); err != nil {
+		log.Printf("orchid requires git: %v", err)
 		return 1
 	}
 	addr := net.JoinHostPort(host, strconv.Itoa(port))
@@ -285,20 +290,16 @@ func lsCmd(args []string) int {
 }
 
 func createCmd(args []string) int {
-	if len(args) < 1 {
-		fmt.Fprintln(os.Stderr, "usage: orchid create <agent> [cwd]")
+	if len(args) < 3 {
+		fmt.Fprintln(os.Stderr, "usage: orchid create <project> <worktree> <agent>")
 		return 2
-	}
-	cwd := ""
-	if len(args) >= 2 {
-		cwd = args[1]
 	}
 	c, err := client.FromRuntime()
 	if err != nil {
 		fmt.Fprintln(os.Stderr, "orchid:", err)
 		return 1
 	}
-	info, err := c.Create("", cwd, args[0])
+	info, err := c.Create(args[0], args[1], args[2])
 	if err != nil {
 		fmt.Fprintln(os.Stderr, "orchid:", err)
 		return 1
