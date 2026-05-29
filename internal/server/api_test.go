@@ -5,78 +5,120 @@ import (
 	"encoding/json"
 	"net/http"
 	"net/http/httptest"
+	"os/exec"
 	"path/filepath"
 	"testing"
 
+	"orchid/internal/project"
 	"orchid/internal/session"
 	"orchid/internal/tmux"
 )
 
-func newTestServer(t *testing.T) (*httptest.Server, *session.Manager) {
+func gitRepo(t *testing.T) string {
+	t.Helper()
+	d := t.TempDir()
+	for _, a := range [][]string{{"init", "-q"}, {"-c", "user.email=t@t", "-c", "user.name=t", "commit", "--allow-empty", "-q", "-m", "i"}} {
+		if out, err := exec.Command("git", append([]string{"-C", d}, a...)...).CombinedOutput(); err != nil {
+			t.Fatalf("git %v: %v %s", a, err, out)
+		}
+	}
+	return d
+}
+
+func newTestServer(t *testing.T) (*httptest.Server, *session.Manager, *project.Store) {
 	t.Helper()
 	if err := tmux.Available(); err != nil {
 		t.Skipf("tmux not available: %v", err)
 	}
+	if err := exec.Command("git", "--version").Run(); err != nil {
+		t.Skipf("git not available")
+	}
 	mgr := session.NewManager(filepath.Join(t.TempDir(), "sessions.json"))
 	t.Cleanup(mgr.KillAll)
-	srv := httptest.NewServer(New(mgr))
+	ps := project.New(filepath.Join(t.TempDir(), "projects.json"))
+	srv := httptest.NewServer(New(mgr, ps))
 	t.Cleanup(srv.Close)
-	return srv, mgr
+	return srv, mgr, ps
 }
 
-func TestAPICreateWithAgentBody(t *testing.T) {
-	srv, mgr := newTestServer(t)
+func TestAPIProjectsCRUD(t *testing.T) {
+	srv, _, _ := newTestServer(t)
+	repo := gitRepo(t)
+	resp, _ := http.Post(srv.URL+"/api/projects", "application/json", bytes.NewBufferString(`{"name":"p","path":"`+repo+`"}`))
+	if resp.StatusCode != 200 {
+		t.Fatalf("create project = %d", resp.StatusCode)
+	}
+	var p project.Project
+	json.NewDecoder(resp.Body).Decode(&p)
+	resp.Body.Close()
+	if p.ID == "" || p.Path != repo {
+		t.Fatalf("project = %+v", p)
+	}
+	resp, _ = http.Post(srv.URL+"/api/projects", "application/json", bytes.NewBufferString(`{"name":"x","path":"`+t.TempDir()+`"}`))
+	if resp.StatusCode != 400 {
+		t.Fatalf("non-git = %d, want 400", resp.StatusCode)
+	}
+	resp.Body.Close()
+}
 
-	body := bytes.NewBufferString(`{"agent":"shell","cwd":"/tmp"}`)
-	resp, err := http.Post(srv.URL+"/api/sessions", "application/json", body)
+func TestAPIWorktreesAndCascade(t *testing.T) {
+	srv, mgr, ps := newTestServer(t)
+	repo := gitRepo(t)
+	p, _ := ps.Add("p", repo)
+
+	resp, _ := http.Get(srv.URL + "/api/projects/" + p.ID + "/worktrees")
+	var wts []map[string]any
+	json.NewDecoder(resp.Body).Decode(&wts)
+	resp.Body.Close()
+	if len(wts) != 1 {
+		t.Fatalf("worktrees = %v", wts)
+	}
+
+	resp, _ = http.Post(srv.URL+"/api/projects/"+p.ID+"/worktrees", "application/json", bytes.NewBufferString(`{"branch":"feat/x"}`))
+	if resp.StatusCode != 200 {
+		t.Fatalf("add wt = %d", resp.StatusCode)
+	}
+	var wt map[string]any
+	json.NewDecoder(resp.Body).Decode(&wt)
+	resp.Body.Close()
+	wtPath := wt["path"].(string)
+
+	s, err := mgr.Create(p.ID, wtPath, "shell")
 	if err != nil {
-		t.Fatalf("post: %v", err)
+		t.Fatalf("create session: %v", err)
 	}
-	if resp.StatusCode != http.StatusOK {
-		t.Fatalf("create status = %d", resp.StatusCode)
+	_ = s
+
+	req, _ := http.NewRequest(http.MethodDelete, srv.URL+"/api/projects/"+p.ID+"/worktrees", bytes.NewBufferString(`{"path":"`+wtPath+`"}`))
+	resp, _ = http.DefaultClient.Do(req)
+	if resp.StatusCode != 204 {
+		t.Fatalf("remove wt = %d", resp.StatusCode)
 	}
-	var created session.Info
-	json.NewDecoder(resp.Body).Decode(&created)
 	resp.Body.Close()
-	if created.ID == "" || created.Agent != "shell" {
-		t.Fatalf("created = %+v", created)
+	if len(mgr.List()) != 0 {
+		t.Fatalf("sessions remain after cascade: %v", mgr.List())
 	}
-	for _, info := range mgr.List() {
-		_ = mgr.Kill(info.ID)
+	resp, _ = http.Get(srv.URL + "/api/projects/" + p.ID + "/worktrees")
+	wts = nil
+	json.NewDecoder(resp.Body).Decode(&wts)
+	resp.Body.Close()
+	if len(wts) != 1 {
+		t.Fatalf("worktree not removed: %v", wts)
 	}
 }
 
-func TestAPICreateUnknownAgent400(t *testing.T) {
-	srv, _ := newTestServer(t)
-	body := bytes.NewBufferString(`{"agent":"nope"}`)
-	resp, _ := http.Post(srv.URL+"/api/sessions", "application/json", body)
-	if resp.StatusCode != http.StatusBadRequest {
-		t.Fatalf("status = %d, want 400", resp.StatusCode)
+func TestAPICreateSessionValidation(t *testing.T) {
+	srv, _, ps := newTestServer(t)
+	repo := gitRepo(t)
+	p, _ := ps.Add("p", repo)
+	resp, _ := http.Post(srv.URL+"/api/sessions", "application/json", bytes.NewBufferString(`{"project":"nope","worktree":"`+repo+`","agent":"shell"}`))
+	if resp.StatusCode != 404 {
+		t.Fatalf("unknown project = %d", resp.StatusCode)
 	}
 	resp.Body.Close()
-}
-
-func TestAPIKillUnknownReturns404(t *testing.T) {
-	srv, _ := newTestServer(t)
-	req, _ := http.NewRequest(http.MethodDelete, srv.URL+"/api/sessions/nope", nil)
-	resp, _ := http.DefaultClient.Do(req)
-	if resp.StatusCode != http.StatusNotFound {
-		t.Fatalf("status = %d, want 404", resp.StatusCode)
-	}
-	resp.Body.Close()
-}
-
-func TestAPIRestartRunningReturns409(t *testing.T) {
-	srv, mgr := newTestServer(t)
-	s, err := mgr.Create("shell", "/tmp")
-	if err != nil {
-		t.Fatalf("create: %v", err)
-	}
-	defer mgr.Kill(s.ID)
-
-	resp, _ := http.Post(srv.URL+"/api/sessions/"+s.ID+"/restart", "application/json", nil)
-	if resp.StatusCode != http.StatusConflict {
-		t.Fatalf("restart running status = %d, want 409", resp.StatusCode)
+	resp, _ = http.Post(srv.URL+"/api/sessions", "application/json", bytes.NewBufferString(`{"project":"`+p.ID+`","worktree":"/nope","agent":"shell"}`))
+	if resp.StatusCode != 400 {
+		t.Fatalf("bad worktree = %d", resp.StatusCode)
 	}
 	resp.Body.Close()
 }

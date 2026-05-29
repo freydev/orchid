@@ -19,6 +19,8 @@ import (
 	"time"
 
 	"orchid/internal/client"
+	"orchid/internal/gitwt"
+	"orchid/internal/project"
 	"orchid/internal/runtime"
 	"orchid/internal/server"
 	"orchid/internal/session"
@@ -66,6 +68,11 @@ func sessionsPath() string {
 	return p
 }
 
+func projectsPath() string {
+	cfg, _ := os.UserConfigDir()
+	return filepath.Join(cfg, "orchid", "projects.json")
+}
+
 func hostPort(args []string) (string, int, error) {
 	fs := flag.NewFlagSet("serve", flag.ContinueOnError)
 	host := fs.String("host", "127.0.0.1", "listen host (localhost only by default)")
@@ -86,12 +93,20 @@ func serveCmd(args []string) int {
 		log.Printf("orchid requires tmux: %v (install tmux and retry)", err)
 		return 1
 	}
+	if err := gitwt.Available(); err != nil {
+		log.Printf("orchid requires git: %v", err)
+		return 1
+	}
 	addr := net.JoinHostPort(host, strconv.Itoa(port))
 	mgr := session.NewManager(sessionsPath())
 	if err := mgr.Restore(); err != nil {
 		log.Printf("orchid: restore sessions: %v", err)
 	}
-	srv := &http.Server{Addr: addr, Handler: server.New(mgr)}
+	ps := project.New(projectsPath())
+	if err := ps.Load(); err != nil {
+		log.Printf("orchid: restore projects: %v", err)
+	}
+	srv := &http.Server{Addr: addr, Handler: server.New(mgr, ps)}
 
 	ctx, stop := signal.NotifyContext(context.Background(), syscall.SIGTERM, syscall.SIGINT)
 	defer stop()
@@ -275,20 +290,16 @@ func lsCmd(args []string) int {
 }
 
 func createCmd(args []string) int {
-	if len(args) < 1 {
-		fmt.Fprintln(os.Stderr, "usage: orchid create <agent> [cwd]")
+	if len(args) < 3 {
+		fmt.Fprintln(os.Stderr, "usage: orchid create <project> <worktree> <agent>")
 		return 2
-	}
-	cwd := ""
-	if len(args) >= 2 {
-		cwd = args[1]
 	}
 	c, err := client.FromRuntime()
 	if err != nil {
 		fmt.Fprintln(os.Stderr, "orchid:", err)
 		return 1
 	}
-	info, err := c.Create(args[0], cwd)
+	info, err := c.Create(args[0], args[1], args[2])
 	if err != nil {
 		fmt.Fprintln(os.Stderr, "orchid:", err)
 		return 1

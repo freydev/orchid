@@ -21,6 +21,8 @@ type Session struct {
 	ID             string
 	Agent          string
 	Cwd            string
+	Project        string
+	Worktree       string
 	Tmux           string
 	AgentSessionID string
 
@@ -62,6 +64,8 @@ func attachSession(rec store.Record, onExit func()) (*Session, error) {
 		ID:             rec.ID,
 		Agent:          rec.Agent,
 		Cwd:            rec.Cwd,
+		Project:        rec.Project,
+		Worktree:       rec.Worktree,
 		Tmux:           rec.Tmux,
 		AgentSessionID: rec.AgentSessionID,
 		ctl:            ctl,

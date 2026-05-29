@@ -17,11 +17,13 @@ import (
 
 // Info is a serializable session summary.
 type Info struct {
-	ID     string `json:"id"`
-	Agent  string `json:"agent"`
-	Cwd    string `json:"cwd"`
-	Status string `json:"status"` // "running" | "stopped"
-	Alive  bool   `json:"alive"`
+	ID       string `json:"id"`
+	Agent    string `json:"agent"`
+	Cwd      string `json:"cwd"`
+	Project  string `json:"project"`
+	Worktree string `json:"worktree"`
+	Status   string `json:"status"` // "running" | "stopped"
+	Alive    bool   `json:"alive"`
 }
 
 // Manager owns sessions (running, with a live PTY) and records (all, incl. stopped).
@@ -79,7 +81,7 @@ func (m *Manager) onExit(id string) {
 	m.saveLocked()
 }
 
-func (m *Manager) Create(agentName, cwd string) (*Session, error) {
+func (m *Manager) Create(projectID, worktree, agentName string) (*Session, error) {
 	ag, ok := agent.Get(agentName)
 	if !ok {
 		return nil, fmt.Errorf("unknown agent %q", agentName)
@@ -88,7 +90,9 @@ func (m *Manager) Create(agentName, cwd string) (*Session, error) {
 	rec := store.Record{
 		ID:             id,
 		Agent:          agentName,
-		Cwd:            agent.ResolveCwd(cwd),
+		Cwd:            worktree,
+		Project:        projectID,
+		Worktree:       worktree,
 		Tmux:           "orchid-" + id,
 		AgentSessionID: uuid.NewString(),
 		Created:        time.Now().UTC(),
@@ -117,6 +121,9 @@ func (m *Manager) Restore() error {
 	m.mu.Lock()
 	var started []*Session
 	for _, rec := range recs {
+		if rec.Project == "" || rec.Worktree == "" {
+			continue
+		}
 		if tmux.HasSession(rec.Tmux) {
 			rec.Status = "running"
 			id := rec.ID
@@ -195,11 +202,13 @@ func (m *Manager) List() []Info {
 	for _, r := range m.records {
 		_, running := m.sessions[r.ID]
 		out = append(out, Info{
-			ID:     r.ID,
-			Agent:  r.Agent,
-			Cwd:    r.Cwd,
-			Status: r.Status,
-			Alive:  running,
+			ID:       r.ID,
+			Agent:    r.Agent,
+			Cwd:      r.Cwd,
+			Project:  r.Project,
+			Worktree: r.Worktree,
+			Status:   r.Status,
+			Alive:    running,
 		})
 	}
 	sort.Slice(out, func(i, j int) bool { return out[i].ID < out[j].ID })
@@ -227,6 +236,35 @@ func (m *Manager) Kill(id string) error {
 	m.saveLocked()
 	m.mu.Unlock()
 	return nil
+}
+
+// KillByWorktree terminates every session (running or stopped) bound to the
+// given worktree path: kill tmux, drop session + record. Returns the count.
+func (m *Manager) KillByWorktree(worktree string) int {
+	m.mu.Lock()
+	var victims []store.Record
+	var live []*Session
+	for id, r := range m.records {
+		if r.Worktree == worktree {
+			victims = append(victims, r)
+			if s := m.sessions[id]; s != nil {
+				live = append(live, s)
+			}
+			delete(m.records, id)
+			delete(m.sessions, id)
+		}
+	}
+	m.mu.Unlock()
+	for _, s := range live {
+		s.Close()
+	}
+	for _, r := range victims {
+		_ = tmux.KillSession(r.Tmux)
+	}
+	m.mu.Lock()
+	m.saveLocked()
+	m.mu.Unlock()
+	return len(victims)
 }
 
 // KillAll closes live PTYs only (shutdown). tmux sessions and records survive
