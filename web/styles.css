@@ -91,6 +91,9 @@ input { font-family: inherit; }
 .wrap { max-width: none; margin: 0; padding: 28px 32px 60px; }
 .wrap.focus-mode { height: calc(100vh - 52px); display: flex; flex-direction: column; padding-bottom: 20px; overflow: hidden; }
 .wrap.focus-mode .focus { flex: 1; min-height: 0; height: auto; }
+.wrap.grid-mode { height: calc(100vh - 52px); display: flex; flex-direction: column; padding-bottom: 20px; overflow: hidden; }
+.wrap.grid-mode .term-grid { flex: 1; min-height: 0; grid-auto-rows: 1fr; }
+.wrap.grid-mode .term-pane { height: auto; min-height: 0; }
 .row { display: flex; align-items: center; }
 .mono { font-family: var(--mono); }
 .dim { color: var(--text-dim); }

@@ -123,8 +123,9 @@ function renderDetail() {
   teardownAll();
   const proj = projects.find((p) => p.id === cur.projectId) || { name: "", path: "" };
   const focus = cur.view === "terminal";
+  const cls = focus ? " focus-mode" : cur.view === "grid" ? " grid-mode" : "";
   main.innerHTML =
-    '<div class="wrap' + (focus ? " focus-mode" : "") + '">' +
+    '<div class="wrap' + cls + '">' +
       detailHeadHtml(proj) + toolsHtml() +
       (cur.view === "list" ? listBodyHtml() : cur.view === "grid" ? gridShellHtml() : focusShellHtml()) +
     "</div>";
