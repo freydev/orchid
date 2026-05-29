@@ -1,8 +1,10 @@
 package server
 
 import (
+	"context"
 	"encoding/json"
 	"net/http"
+	"time"
 
 	"github.com/coder/websocket"
 )
@@ -41,7 +43,10 @@ func (s *Server) handleWS(w http.ResponseWriter, r *http.Request) {
 
 	// Replay scrollback first.
 	if replay := sess.Replay(); len(replay) > 0 {
-		if err := c.Write(ctx, websocket.MessageBinary, replay); err != nil {
+		wctx, cancel := context.WithTimeout(ctx, 10*time.Second)
+		err := c.Write(wctx, websocket.MessageBinary, replay)
+		cancel()
+		if err != nil {
 			return
 		}
 	}
@@ -56,7 +61,10 @@ func (s *Server) handleWS(w http.ResponseWriter, r *http.Request) {
 				c.Close(websocket.StatusGoingAway, "detached")
 				return
 			case b := <-att.Ch():
-				if err := c.Write(ctx, websocket.MessageBinary, b); err != nil {
+				wctx, cancel := context.WithTimeout(ctx, 10*time.Second)
+				err := c.Write(wctx, websocket.MessageBinary, b)
+				cancel()
+				if err != nil {
 					return
 				}
 			}

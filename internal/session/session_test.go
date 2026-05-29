@@ -7,7 +7,7 @@ import (
 )
 
 func TestSessionEchoesToRing(t *testing.T) {
-	s, err := newSession("test1")
+	s, err := newSession("test1", nil)
 	if err != nil {
 		t.Fatalf("newSession: %v", err)
 	}
@@ -31,7 +31,7 @@ func TestSessionEchoesToRing(t *testing.T) {
 }
 
 func TestSessionAliveFlips(t *testing.T) {
-	s, err := newSession("test2")
+	s, err := newSession("test2", nil)
 	if err != nil {
 		t.Fatalf("newSession: %v", err)
 	}
@@ -50,7 +50,7 @@ func TestSessionAliveFlips(t *testing.T) {
 }
 
 func TestSessionAttachReceivesOutput(t *testing.T) {
-	s, err := newSession("test3")
+	s, err := newSession("test3", nil)
 	if err != nil {
 		t.Fatalf("newSession: %v", err)
 	}
@@ -79,7 +79,7 @@ func TestSessionAttachReceivesOutput(t *testing.T) {
 }
 
 func TestSessionAttachKicksPrevious(t *testing.T) {
-	s, err := newSession("test4")
+	s, err := newSession("test4", nil)
 	if err != nil {
 		t.Fatalf("newSession: %v", err)
 	}

@@ -30,9 +30,15 @@ func newID() string {
 	return hex.EncodeToString(b)
 }
 
+func (m *Manager) remove(id string) {
+	m.mu.Lock()
+	delete(m.sessions, id)
+	m.mu.Unlock()
+}
+
 func (m *Manager) Create() (*Session, error) {
 	id := newID()
-	s, err := newSession(id)
+	s, err := newSession(id, func() { m.remove(id) })
 	if err != nil {
 		return nil, err
 	}

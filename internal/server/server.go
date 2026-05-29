@@ -1,7 +1,6 @@
 package server
 
 import (
-	"io/fs"
 	"net/http"
 
 	"orchid/internal/session"
@@ -25,6 +24,5 @@ func (s *Server) routes() {
 	s.mux.HandleFunc("DELETE /api/sessions/{id}", s.handleKill)
 	s.mux.HandleFunc("GET /ws/{id}", s.handleWS)
 
-	static, _ := fs.Sub(web.FS, ".")
-	s.mux.Handle("/", http.FileServer(http.FS(static)))
+	s.mux.Handle("/", http.FileServer(http.FS(web.FS)))
 }

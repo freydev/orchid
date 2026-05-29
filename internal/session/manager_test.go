@@ -3,6 +3,7 @@ package session
 import (
 	"sync"
 	"testing"
+	"time"
 )
 
 func TestManagerCreateGetKill(t *testing.T) {
@@ -51,5 +52,28 @@ func TestManagerConcurrentCreate(t *testing.T) {
 	wg.Wait()
 	if len(m.List()) != 10 {
 		t.Fatalf("List len = %d, want 10", len(m.List()))
+	}
+}
+
+func TestSelfExitRemovesFromManager(t *testing.T) {
+	m := NewManager()
+	defer m.KillAll()
+	s, err := m.Create()
+	if err != nil {
+		t.Fatalf("create: %v", err)
+	}
+	if _, err := s.Write([]byte("exit\n")); err != nil {
+		t.Fatalf("write: %v", err)
+	}
+	deadline := time.After(5 * time.Second)
+	for {
+		if _, ok := m.Get(s.ID); !ok {
+			return // removed — success
+		}
+		select {
+		case <-deadline:
+			t.Fatal("session not removed from manager after shell exit")
+		case <-time.After(50 * time.Millisecond):
+		}
 	}
 }

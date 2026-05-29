@@ -20,9 +20,10 @@ type attachment struct {
 type Session struct {
 	ID string
 
-	cmd  *exec.Cmd
-	pty  *os.File
-	ring *ringBuffer
+	cmd    *exec.Cmd
+	pty    *os.File
+	ring   *ringBuffer
+	onExit func()
 
 	mu       sync.Mutex
 	alive    bool
@@ -30,7 +31,7 @@ type Session struct {
 	doneOnce sync.Once
 }
 
-func newSession(id string) (*Session, error) {
+func newSession(id string, onExit func()) (*Session, error) {
 	shell := os.Getenv("SHELL")
 	if shell == "" {
 		shell = "/bin/bash"
@@ -41,7 +42,7 @@ func newSession(id string) (*Session, error) {
 	if err != nil {
 		return nil, err
 	}
-	s := &Session{ID: id, cmd: cmd, pty: f, ring: newRingBuffer(ringSize), alive: true}
+	s := &Session{ID: id, cmd: cmd, pty: f, ring: newRingBuffer(ringSize), onExit: onExit, alive: true}
 	go s.readLoop()
 	return s, nil
 }
@@ -64,6 +65,10 @@ func (s *Session) readLoop() {
 		s.sub = nil
 	}
 	s.mu.Unlock()
+	s.Close()
+	if s.onExit != nil {
+		s.onExit()
+	}
 }
 
 // broadcast writes output to the ring and the live subscriber (if any).
@@ -103,6 +108,7 @@ func (s *Session) Close() {
 		if s.cmd.Process != nil {
 			_ = s.cmd.Process.Kill()
 		}
+		go func() { _ = s.cmd.Wait() }()
 	})
 }
 
