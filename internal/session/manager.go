@@ -30,6 +30,7 @@ type Manager struct {
 	sessions map[string]*Session
 	records  map[string]store.Record
 	path     string
+	closing  bool
 }
 
 func NewManager(path string) *Manager {
@@ -60,15 +61,21 @@ func (m *Manager) saveLocked() {
 }
 
 // onExit marks a session stopped: drop its live PTY entry, flip the record to
-// stopped, and persist. The record is retained (resumable).
+// stopped, and persist. The record is retained (resumable). No-op during
+// shutdown (KillAll) so still-alive tmux sessions are not falsely marked stopped.
 func (m *Manager) onExit(id string) {
 	m.mu.Lock()
 	defer m.mu.Unlock()
-	delete(m.sessions, id)
-	if r, ok := m.records[id]; ok {
-		r.Status = "stopped"
-		m.records[id] = r
+	if m.closing {
+		return
 	}
+	delete(m.sessions, id)
+	r, ok := m.records[id]
+	if !ok {
+		return // already removed (e.g. by Kill); nothing to persist
+	}
+	r.Status = "stopped"
+	m.records[id] = r
 	m.saveLocked()
 }
 
@@ -216,6 +223,7 @@ func (m *Manager) Kill(id string) error {
 // so they can be restored next boot.
 func (m *Manager) KillAll() {
 	m.mu.Lock()
+	m.closing = true
 	all := make([]*Session, 0, len(m.sessions))
 	for _, s := range m.sessions {
 		all = append(all, s)
