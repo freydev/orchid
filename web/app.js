@@ -59,11 +59,12 @@ async function refresh() {
     if (s.id === activeId) li.classList.add("active");
     if (s.status !== "running") li.classList.add("dead");
 
+    li.onclick = () => onSelect(s);
+
     const meta = document.createElement("div");
     meta.className = "meta";
     const dot = '<span class="dot ' + s.status + '"></span>';
     meta.innerHTML = dot + s.agent + '<span class="sub">' + s.id + "</span>";
-    meta.onclick = () => onSelect(s);
 
     const btns = document.createElement("div");
     btns.className = "btns";
