@@ -12,12 +12,17 @@ import (
 	"orchid/internal/server"
 	"orchid/internal/session"
 	"orchid/internal/store"
+	"orchid/internal/tmux"
 )
 
 func main() {
 	host := flag.String("host", "127.0.0.1", "listen host (localhost only by default)")
 	port := flag.Int("port", 8081, "listen port")
 	flag.Parse()
+
+	if err := tmux.Available(); err != nil {
+		log.Fatalf("orchid requires tmux: %v (install tmux and retry)", err)
+	}
 
 	addr := net.JoinHostPort(*host, strconv.Itoa(*port))
 
@@ -33,7 +38,7 @@ func main() {
 	defer mgr.KillAll()
 
 	h := server.New(mgr)
-	log.Printf("orchid listening on http://%s", addr)
+	log.Printf("orchid listening on http://%s (sessions: %s)", addr, sessPath)
 	if err := http.ListenAndServe(addr, h); err != nil {
 		log.Fatal(err)
 	}
