@@ -26,11 +26,10 @@ func NewSession(name, cwd string, argv []string) error {
 	if err != nil {
 		return fmt.Errorf("tmux new-session: %w: %s", err, out)
 	}
-	// Enable mouse mode for this session so the wheel scrolls tmux's scrollback
-	// (copy mode) instead of being translated to arrow keys (shell history) by
-	// the terminal's alternate-scroll behavior. Best-effort: a session without
-	// mouse mode is still fully usable.
-	_ = exec.Command("tmux", "set-option", "-t", name, "mouse", "on").Run()
+	// window-size latest lets the control client's refresh-client -C drive the
+	// pane size. (mouse mode is intentionally NOT set: native xterm scrollback
+	// replaces tmux copy-mode under control mode.)
+	_ = exec.Command("tmux", "set-option", "-t", name, "window-size", "latest").Run()
 	return nil
 }
 

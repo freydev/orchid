@@ -49,20 +49,19 @@ func TestSessionRoundtrip(t *testing.T) {
 	}
 }
 
-func TestNewSessionEnablesMouse(t *testing.T) {
+func TestNewSessionSetsWindowSizeLatest(t *testing.T) {
 	skipIfNoTmux(t)
-	name := "orchid-test-mouse"
+	name := "orchid-test-winsize"
 	_ = KillSession(name)
 	defer KillSession(name)
-
 	if err := NewSession(name, "/tmp", []string{"sleep", "60"}); err != nil {
 		t.Fatalf("NewSession: %v", err)
 	}
-	out, err := exec.Command("tmux", "show-options", "-t", name, "mouse").CombinedOutput()
+	out, err := exec.Command("tmux", "show-options", "-t", name, "window-size").CombinedOutput()
 	if err != nil {
 		t.Fatalf("show-options: %v: %s", err, out)
 	}
-	if !strings.Contains(string(out), "mouse on") {
-		t.Fatalf("expected mouse on for orchid session, got %q", out)
+	if !strings.Contains(string(out), "latest") {
+		t.Fatalf("want window-size latest, got %q", out)
 	}
 }
