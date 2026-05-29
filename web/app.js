@@ -21,6 +21,24 @@ const ICONS = {
 const icon = (n, sz = 16) =>
   `<svg width="${sz}" height="${sz}" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round">${ICONS[n] || ""}</svg>`;
 
+/* Monokai palette on the dashboard's near-black terminal surface (#08080b),
+   with the dashboard accent for selection — so xterm blends with the UI theme. */
+const MONOKAI = {
+  background: "#08080b",
+  foreground: "#f8f8f2",
+  cursor: "#a6e22e",
+  cursorAccent: "#08080b",
+  selectionBackground: "rgba(124,156,255,0.30)",
+  black: "#272822",   brightBlack: "#75715e",
+  red: "#f92672",     brightRed: "#f92672",
+  green: "#a6e22e",   brightGreen: "#a6e22e",
+  yellow: "#e6db74",  brightYellow: "#f4bf75",
+  blue: "#66d9ef",    brightBlue: "#66d9ef",
+  magenta: "#ae81ff", brightMagenta: "#ae81ff",
+  cyan: "#a1efe4",    brightCyan: "#a1efe4",
+  white: "#f8f8f2",   brightWhite: "#f9f8f5",
+};
+
 /* ---------- state ---------- */
 let sessions = [];
 let view = "list";        // "list" | "focus"
@@ -151,7 +169,7 @@ function attachTerminal(id) {
     tb.innerHTML = '<div id="placeholder">stopped — restart to attach</div>';
     return;
   }
-  term = new Terminal({ cursorBlink: true, fontSize: 13, scrollback: 5000, theme: { background: "#08080b" } });
+  term = new Terminal({ cursorBlink: true, fontSize: 13, scrollback: 5000, theme: MONOKAI });
   fit = new FitAddon.FitAddon();
   term.loadAddon(fit);
   term.open(tb);
