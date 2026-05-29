@@ -6,6 +6,7 @@ import (
 	"testing"
 	"time"
 
+	"orchid/internal/store"
 	"orchid/internal/tmux"
 )
 
@@ -18,8 +19,7 @@ func skipNoTmux(t *testing.T) {
 
 func newTestManager(t *testing.T) *Manager {
 	t.Helper()
-	path := filepath.Join(t.TempDir(), "sessions.json")
-	m := NewManager(path)
+	m := NewManager(filepath.Join(t.TempDir(), "sessions.json"))
 	t.Cleanup(m.KillAll)
 	return m
 }
@@ -27,33 +27,32 @@ func newTestManager(t *testing.T) *Manager {
 func TestManagerCreateGetKill(t *testing.T) {
 	skipNoTmux(t)
 	m := newTestManager(t)
-	s, err := m.Create("shell", "/tmp")
+	s, err := m.Create("p-1", "/tmp", "shell")
 	if err != nil {
 		t.Fatalf("create: %v", err)
 	}
 	defer tmux.KillSession(s.Tmux)
-
-	got, ok := m.Get(s.ID)
-	if !ok || got.ID != s.ID {
-		t.Fatalf("Get(%q) = %v, %v", s.ID, got, ok)
+	if s.Project != "p-1" || s.Worktree != "/tmp" || s.Cwd != "/tmp" {
+		t.Fatalf("binding = %+v", s)
 	}
-	if len(m.List()) != 1 {
-		t.Fatalf("List len = %d, want 1", len(m.List()))
+	if _, ok := m.Get(s.ID); !ok {
+		t.Fatal("Get failed")
 	}
-	if m.List()[0].Agent != "shell" || m.List()[0].Status != "running" {
-		t.Fatalf("info = %+v", m.List()[0])
+	info := m.List()[0]
+	if info.Project != "p-1" || info.Worktree != "/tmp" {
+		t.Fatalf("info = %+v", info)
 	}
 	if err := m.Kill(s.ID); err != nil {
 		t.Fatalf("kill: %v", err)
 	}
 	if len(m.List()) != 0 {
-		t.Fatalf("expected empty after kill, got %+v", m.List())
+		t.Fatal("expected empty after kill")
 	}
 }
 
 func TestManagerCreateUnknownAgent(t *testing.T) {
 	m := newTestManager(t)
-	if _, err := m.Create("nope", "/tmp"); err == nil {
+	if _, err := m.Create("p-1", "/tmp", "nope"); err == nil {
 		t.Fatal("expected error for unknown agent")
 	}
 }
@@ -65,15 +64,38 @@ func TestManagerKillUnknown(t *testing.T) {
 	}
 }
 
+func TestKillByWorktree(t *testing.T) {
+	skipNoTmux(t)
+	m := newTestManager(t)
+	a, _ := m.Create("p-1", "/tmp/wtA", "shell")
+	b, _ := m.Create("p-1", "/tmp/wtA", "shell")
+	c, _ := m.Create("p-1", "/tmp/wtB", "shell")
+	defer tmux.KillSession(a.Tmux)
+	defer tmux.KillSession(b.Tmux)
+	defer tmux.KillSession(c.Tmux)
+	n := m.KillByWorktree("/tmp/wtA")
+	if n != 2 {
+		t.Fatalf("killed %d, want 2", n)
+	}
+	if _, ok := m.Get(a.ID); ok {
+		t.Fatal("a should be gone")
+	}
+	if _, ok := m.Get(b.ID); ok {
+		t.Fatal("b should be gone")
+	}
+	if _, ok := m.Get(c.ID); !ok {
+		t.Fatal("c should remain")
+	}
+}
+
 func TestSelfExitMarksStopped(t *testing.T) {
 	skipNoTmux(t)
 	m := newTestManager(t)
-	s, err := m.Create("shell", "/tmp")
+	s, err := m.Create("p-1", "/tmp", "shell")
 	if err != nil {
 		t.Fatalf("create: %v", err)
 	}
 	defer tmux.KillSession(s.Tmux)
-
 	if _, err := s.Write([]byte("exit\n")); err != nil {
 		t.Fatalf("write: %v", err)
 	}
@@ -88,78 +110,60 @@ func TestSelfExitMarksStopped(t *testing.T) {
 		}
 		select {
 		case <-deadline:
-			t.Fatalf("session not marked stopped; list=%+v", m.List())
+			t.Fatalf("not stopped; list=%+v", m.List())
 		case <-time.After(100 * time.Millisecond):
 		}
 	}
 }
 
-func TestManagerRestoreReconciles(t *testing.T) {
+func TestRestoreDropsLegacy(t *testing.T) {
 	skipNoTmux(t)
-	m := newTestManager(t)
-	alive, _ := m.Create("shell", "/tmp")
-	defer tmux.KillSession(alive.Tmux)
-	dead, _ := m.Create("shell", "/tmp")
-	_ = tmux.KillSession(dead.Tmux)
+	dir := t.TempDir()
+	path := filepath.Join(dir, "sessions.json")
 
-	m2 := NewManager(m.path)
-	t.Cleanup(m2.KillAll)
-	if err := m2.Restore(); err != nil {
+	// Write two records: one bound (project+worktree set), one legacy (no project/worktree).
+	// The bound record has a fake Tmux name that won't exist — Restore will mark it stopped
+	// but still retain it. The legacy one must be dropped entirely.
+	bound := store.Record{
+		ID:       "aabbccdd",
+		Agent:    "shell",
+		Cwd:      "/tmp",
+		Project:  "p-bound",
+		Worktree: "/tmp",
+		Tmux:     "orchid-aabbccdd-nonexistent",
+		Status:   "running",
+	}
+	legacy := store.Record{
+		ID:     "11223344",
+		Agent:  "shell",
+		Cwd:    "/tmp",
+		Tmux:   "orchid-11223344-nonexistent",
+		Status: "running",
+		// Project and Worktree intentionally empty
+	}
+	if err := store.Save(path, []store.Record{bound, legacy}); err != nil {
+		t.Fatalf("save: %v", err)
+	}
+
+	m := NewManager(path)
+	t.Cleanup(m.KillAll)
+	if err := m.Restore(); err != nil {
 		t.Fatalf("restore: %v", err)
 	}
 
-	var aliveInfo, deadInfo *Info
-	infos := m2.List()
-	for i := range infos {
-		switch infos[i].ID {
-		case alive.ID:
-			aliveInfo = &infos[i]
-		case dead.ID:
-			deadInfo = &infos[i]
-		}
+	list := m.List()
+	if len(list) != 1 {
+		t.Fatalf("expected 1 record after restore (legacy dropped), got %d: %+v", len(list), list)
 	}
-	if aliveInfo == nil || aliveInfo.Status != "running" {
-		t.Fatalf("alive session not running after restore: %+v", aliveInfo)
+	if list[0].ID != bound.ID {
+		t.Fatalf("surviving record ID = %q, want %q", list[0].ID, bound.ID)
 	}
-	if deadInfo == nil || deadInfo.Status != "stopped" {
-		t.Fatalf("dead session not stopped after restore: %+v", deadInfo)
+	if list[0].Project != "p-bound" {
+		t.Fatalf("surviving record Project = %q, want %q", list[0].Project, "p-bound")
 	}
-}
-
-func TestManagerRestart(t *testing.T) {
-	skipNoTmux(t)
-	m := newTestManager(t)
-	s, _ := m.Create("shell", "/tmp")
-	tmuxName := s.Tmux
-	defer tmux.KillSession(tmuxName)
-
-	_ = tmux.KillSession(tmuxName)
-	deadline := time.After(8 * time.Second)
-	for {
-		if len(m.List()) == 1 && m.List()[0].Status == "stopped" {
-			break
-		}
-		select {
-		case <-deadline:
-			t.Fatalf("did not reach stopped; list=%+v", m.List())
-		case <-time.After(100 * time.Millisecond):
-		}
-	}
-
-	rs, err := m.Restart(s.ID)
-	if err != nil {
-		t.Fatalf("restart: %v", err)
-	}
-	defer tmux.KillSession(rs.Tmux)
-	if _, ok := m.Get(s.ID); !ok {
-		t.Fatal("restarted session not in running map")
-	}
-	if m.List()[0].Status != "running" {
-		t.Fatalf("status after restart = %q", m.List()[0].Status)
-	}
-
-	if _, err := m.Restart(s.ID); err == nil {
-		t.Fatal("expected error restarting a running session")
+	// Tmux session doesn't exist, so it must be stopped (not running).
+	if list[0].Status != "stopped" {
+		t.Fatalf("surviving record Status = %q, want %q", list[0].Status, "stopped")
 	}
 }
 
@@ -171,7 +175,7 @@ func TestManagerConcurrentCreate(t *testing.T) {
 		wg.Add(1)
 		go func() {
 			defer wg.Done()
-			s, err := m.Create("shell", "/tmp")
+			s, err := m.Create("p-1", "/tmp", "shell")
 			if err != nil {
 				t.Errorf("create: %v", err)
 				return

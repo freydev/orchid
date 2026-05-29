@@ -11,8 +11,10 @@ func (s *Server) handleList(w http.ResponseWriter, r *http.Request) {
 }
 
 type createReq struct {
-	Agent string `json:"agent"`
-	Cwd   string `json:"cwd"`
+	Agent    string `json:"agent"`
+	Cwd      string `json:"cwd"`
+	Project  string `json:"project"`
+	Worktree string `json:"worktree"`
 }
 
 func (s *Server) handleCreate(w http.ResponseWriter, r *http.Request) {
@@ -24,7 +26,12 @@ func (s *Server) handleCreate(w http.ResponseWriter, r *http.Request) {
 		http.Error(w, "missing agent", http.StatusBadRequest)
 		return
 	}
-	sess, err := s.mgr.Create(req.Agent, req.Cwd)
+	// Worktree defaults to Cwd for backward compatibility.
+	worktree := req.Worktree
+	if worktree == "" {
+		worktree = req.Cwd
+	}
+	sess, err := s.mgr.Create(req.Project, worktree, req.Agent)
 	if err != nil {
 		if strings.Contains(err.Error(), "unknown agent") {
 			http.Error(w, err.Error(), http.StatusBadRequest)

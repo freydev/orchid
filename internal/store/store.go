@@ -14,6 +14,8 @@ type Record struct {
 	ID             string    `json:"id"`
 	Agent          string    `json:"agent"`
 	Cwd            string    `json:"cwd"`
+	Project        string    `json:"project"`
+	Worktree       string    `json:"worktree"`
 	Tmux           string    `json:"tmux"`
 	AgentSessionID string    `json:"agent_session_id"`
 	Created        time.Time `json:"created"`

@@ -34,7 +34,7 @@ func TestCreate(t *testing.T) {
 		}
 		w.Write([]byte(`{"id":"b2","agent":"claude","cwd":"/x","status":"running","alive":true}`))
 	})
-	info, err := c.Create("claude", "/x")
+	info, err := c.Create("p-1", "/x", "claude")
 	if err != nil || info.ID != "b2" || info.Agent != "claude" {
 		t.Fatalf("Create = %+v, %v", info, err)
 	}
@@ -44,7 +44,7 @@ func TestCreateUnknownAgent400(t *testing.T) {
 	c := stub(t, func(w http.ResponseWriter, r *http.Request) {
 		http.Error(w, "unknown agent \"nope\"", http.StatusBadRequest)
 	})
-	if _, err := c.Create("nope", ""); err == nil {
+	if _, err := c.Create("p-1", "", "nope"); err == nil {
 		t.Fatal("expected error on 400")
 	}
 }

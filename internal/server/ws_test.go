@@ -22,7 +22,7 @@ func TestWSEchoAndUnknown404(t *testing.T) {
 	srv := httptest.NewServer(h)
 	defer srv.Close()
 
-	sess, err := mgr.Create("shell", "/tmp")
+	sess, err := mgr.Create("p-1", "/tmp", "shell")
 	if err != nil {
 		t.Fatalf("create session: %v", err)
 	}

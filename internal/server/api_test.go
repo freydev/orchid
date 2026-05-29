@@ -68,7 +68,7 @@ func TestAPIKillUnknownReturns404(t *testing.T) {
 
 func TestAPIRestartRunningReturns409(t *testing.T) {
 	srv, mgr := newTestServer(t)
-	s, err := mgr.Create("shell", "/tmp")
+	s, err := mgr.Create("p-1", "/tmp", "shell")
 	if err != nil {
 		t.Fatalf("create: %v", err)
 	}

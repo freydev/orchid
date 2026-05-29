@@ -83,8 +83,8 @@ func (c *Client) List() ([]session.Info, error) {
 	return infos, nil
 }
 
-func (c *Client) Create(agent, cwd string) (session.Info, error) {
-	body, _ := json.Marshal(map[string]string{"agent": agent, "cwd": cwd})
+func (c *Client) Create(project, worktree, agent string) (session.Info, error) {
+	body, _ := json.Marshal(map[string]string{"project": project, "worktree": worktree, "agent": agent, "cwd": worktree})
 	resp, err := c.do(http.MethodPost, "/api/sessions", bytes.NewReader(body))
 	if err != nil {
 		return session.Info{}, err

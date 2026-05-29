@@ -288,7 +288,7 @@ func createCmd(args []string) int {
 		fmt.Fprintln(os.Stderr, "orchid:", err)
 		return 1
 	}
-	info, err := c.Create(args[0], cwd)
+	info, err := c.Create("", cwd, args[0])
 	if err != nil {
 		fmt.Fprintln(os.Stderr, "orchid:", err)
 		return 1
