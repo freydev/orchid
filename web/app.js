@@ -142,7 +142,9 @@ function attachTerminal(id) {
         '<button class="btn sm icon ghost" data-act="restart" title="Restart">' + icon("restart", 14) + "</button>" +
         '<button class="btn sm icon ghost danger" data-act="kill" title="Kill">' + icon("kill", 13) + "</button>" +
       "</div>" +
-      '<div class="term-body" id="termBody"></div>' +
+      // xterm hosts its own scrolling viewport — the container must NOT add a
+      // second scrollbar/padding (avoid double scroll), so it is bare, not .term-body.
+      '<div id="termBody" style="flex:1;min-height:0;overflow:hidden;background:#08080b"></div>' +
     "</div>";
   const tb = document.getElementById("termBody");
   if (s.status !== "running") {
