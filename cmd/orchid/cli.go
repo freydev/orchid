@@ -11,9 +11,11 @@ import (
 	exec "os/exec"
 	"os/signal"
 	"path/filepath"
+	goruntime "runtime"
 	"strconv"
 	"strings"
 	"syscall"
+	"text/tabwriter"
 	"time"
 
 	"orchid/internal/client"
@@ -202,8 +204,112 @@ func statusCmd(args []string) int {
 	}
 	return 0
 }
-func openCmd(args []string) int    { fmt.Fprintln(os.Stderr, "not implemented"); return 1 }
-func lsCmd(args []string) int      { fmt.Fprintln(os.Stderr, "not implemented"); return 1 }
-func createCmd(args []string) int  { fmt.Fprintln(os.Stderr, "not implemented"); return 1 }
-func rmCmd(args []string) int      { fmt.Fprintln(os.Stderr, "not implemented"); return 1 }
-func restartCmd(args []string) int { fmt.Fprintln(os.Stderr, "not implemented"); return 1 }
+func runtimeGOOS() string { return goruntime.GOOS }
+
+func openCmd(args []string) int {
+	c, err := client.FromRuntime()
+	if err != nil {
+		fmt.Fprintln(os.Stderr, "orchid:", err)
+		return 1
+	}
+	url := c.BaseURL()
+	var opener string
+	switch runtimeGOOS() {
+	case "darwin":
+		opener = "open"
+	default:
+		opener = "xdg-open"
+	}
+	if _, err := exec.LookPath(opener); err != nil {
+		fmt.Println(url)
+		return 0
+	}
+	if err := exec.Command(opener, url).Start(); err != nil {
+		fmt.Println(url)
+	}
+	return 0
+}
+
+func lsCmd(args []string) int {
+	c, err := client.FromRuntime()
+	if err != nil {
+		fmt.Fprintln(os.Stderr, "orchid:", err)
+		return 1
+	}
+	infos, err := c.List()
+	if err != nil {
+		fmt.Fprintln(os.Stderr, "orchid:", err)
+		return 1
+	}
+	if len(infos) == 0 {
+		fmt.Println("no sessions")
+		return 0
+	}
+	w := tabwriter.NewWriter(os.Stdout, 0, 2, 2, ' ', 0)
+	fmt.Fprintln(w, "ID\tAGENT\tSTATUS\tCWD")
+	for _, s := range infos {
+		fmt.Fprintf(w, "%s\t%s\t%s\t%s\n", s.ID, s.Agent, s.Status, s.Cwd)
+	}
+	w.Flush()
+	return 0
+}
+
+func createCmd(args []string) int {
+	if len(args) < 1 {
+		fmt.Fprintln(os.Stderr, "usage: orchid create <agent> [cwd]")
+		return 2
+	}
+	cwd := ""
+	if len(args) >= 2 {
+		cwd = args[1]
+	}
+	c, err := client.FromRuntime()
+	if err != nil {
+		fmt.Fprintln(os.Stderr, "orchid:", err)
+		return 1
+	}
+	info, err := c.Create(args[0], cwd)
+	if err != nil {
+		fmt.Fprintln(os.Stderr, "orchid:", err)
+		return 1
+	}
+	fmt.Println(info.ID)
+	return 0
+}
+
+func rmCmd(args []string) int {
+	if len(args) < 1 {
+		fmt.Fprintln(os.Stderr, "usage: orchid rm <id>")
+		return 2
+	}
+	c, err := client.FromRuntime()
+	if err != nil {
+		fmt.Fprintln(os.Stderr, "orchid:", err)
+		return 1
+	}
+	if err := c.Kill(args[0]); err != nil {
+		fmt.Fprintln(os.Stderr, "orchid:", err)
+		return 1
+	}
+	fmt.Printf("%s removed\n", args[0])
+	return 0
+}
+
+func restartCmd(args []string) int {
+	if len(args) < 1 {
+		fmt.Fprintln(os.Stderr, "usage: orchid restart <id>")
+		return 2
+	}
+	c, err := client.FromRuntime()
+	if err != nil {
+		fmt.Fprintln(os.Stderr, "orchid:", err)
+		return 1
+	}
+	info, err := c.Restart(args[0])
+	if err != nil {
+		fmt.Fprintln(os.Stderr, "orchid:", err)
+		return 1
+	}
+	fmt.Printf("%s %s\n", info.ID, info.Status)
+	return 0
+}
