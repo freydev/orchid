@@ -128,6 +128,10 @@ func startCmd(args []string) int {
 		return 1
 	}
 	logPath := filepath.Join(filepath.Dir(sessionsPath()), "orchid.log")
+	if err := os.MkdirAll(filepath.Dir(logPath), 0o755); err != nil {
+		fmt.Fprintln(os.Stderr, "orchid:", err)
+		return 1
+	}
 	logf, err := os.OpenFile(logPath, os.O_CREATE|os.O_WRONLY|os.O_APPEND, 0o644)
 	if err != nil {
 		fmt.Fprintln(os.Stderr, "orchid:", err)
@@ -144,8 +148,17 @@ func startCmd(args []string) int {
 		return 1
 	}
 
+	exited := make(chan struct{})
+	go func() { _ = cmd.Wait(); close(exited) }()
+
 	listening := false
 	for i := 0; i < 30; i++ {
+		select {
+		case <-exited:
+			fmt.Fprintf(os.Stderr, "orchid: server exited during startup; see %s\n", logPath)
+			return 1
+		default:
+		}
 		conn, derr := net.DialTimeout("tcp", addr, 200*time.Millisecond)
 		if derr == nil {
 			conn.Close()
@@ -158,6 +171,13 @@ func startCmd(args []string) int {
 		_ = cmd.Process.Kill()
 		fmt.Fprintf(os.Stderr, "orchid: server did not start; see %s\n", logPath)
 		return 1
+	}
+	// Final check: child still alive before we record it.
+	select {
+	case <-exited:
+		fmt.Fprintf(os.Stderr, "orchid: server exited during startup; see %s\n", logPath)
+		return 1
+	default:
 	}
 	if err := runtime.Write(runtime.Info{PID: cmd.Process.Pid, Addr: addr}); err != nil {
 		fmt.Fprintln(os.Stderr, "orchid:", err)

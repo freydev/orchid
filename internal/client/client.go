@@ -60,7 +60,11 @@ func (c *Client) do(method, path string, body io.Reader) (*http.Response, error)
 
 func errFromResp(resp *http.Response) error {
 	b, _ := io.ReadAll(resp.Body)
-	return fmt.Errorf("%s", strings.TrimSpace(string(b)))
+	msg := strings.TrimSpace(string(b))
+	if msg == "" {
+		msg = resp.Status
+	}
+	return fmt.Errorf("%s", msg)
 }
 
 func (c *Client) List() ([]session.Info, error) {
