@@ -103,6 +103,7 @@ func (m *Manager) Create(agentName, cwd string) (*Session, error) {
 	m.records[id] = rec
 	m.saveLocked()
 	m.mu.Unlock()
+	s.Start()
 	return s, nil
 }
 
@@ -114,7 +115,7 @@ func (m *Manager) Restore() error {
 		return err
 	}
 	m.mu.Lock()
-	defer m.mu.Unlock()
+	var started []*Session
 	for _, rec := range recs {
 		if tmux.HasSession(rec.Tmux) {
 			rec.Status = "running"
@@ -125,6 +126,7 @@ func (m *Manager) Restore() error {
 				rec.Status = "stopped"
 			} else {
 				m.sessions[rec.ID] = s
+				started = append(started, s)
 			}
 		} else {
 			rec.Status = "stopped"
@@ -132,6 +134,10 @@ func (m *Manager) Restore() error {
 		m.records[rec.ID] = rec
 	}
 	m.saveLocked()
+	m.mu.Unlock()
+	for _, s := range started {
+		s.Start()
+	}
 	return nil
 }
 
@@ -156,6 +162,9 @@ func (m *Manager) Restart(id string) (*Session, error) {
 		argv = ag.NewCommand(rec.Cwd, rec.AgentSessionID)
 	}
 	if err := tmux.NewSession(rec.Tmux, rec.Cwd, argv); err != nil {
+		if tmux.HasSession(rec.Tmux) {
+			return nil, fmt.Errorf("session %q already running", id)
+		}
 		return nil, err
 	}
 	s, err := attachSession(rec, func() { m.onExit(id) })
@@ -168,6 +177,7 @@ func (m *Manager) Restart(id string) (*Session, error) {
 	m.records[id] = rec
 	m.saveLocked()
 	m.mu.Unlock()
+	s.Start()
 	return s, nil
 }
 

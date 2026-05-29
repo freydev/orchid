@@ -25,6 +25,7 @@ func newTestSession(t *testing.T, id string) *Session {
 	if err != nil {
 		t.Fatalf("createSession: %v", err)
 	}
+	s.Start()
 	t.Cleanup(func() { s.Close(); tmux.KillSession(name) })
 	return s
 }

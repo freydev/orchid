@@ -69,8 +69,13 @@ func attachSession(rec store.Record, onExit func()) (*Session, error) {
 		onExit:         onExit,
 		alive:          true,
 	}
-	go s.readLoop()
 	return s, nil
+}
+
+// Start begins the PTY read loop. Call exactly once, after the session has
+// been registered with its owner, so onExit never races ahead of registration.
+func (s *Session) Start() {
+	go s.readLoop()
 }
 
 func (s *Session) readLoop() {
