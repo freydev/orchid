@@ -1,0 +1,37 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>Orchid</title>
+  <link rel="stylesheet" href="/vendor/xterm.css" />
+  <style>
+    * { box-sizing: border-box; }
+    html, body { height: 100%; margin: 0; font-family: system-ui, sans-serif; }
+    #app { display: flex; height: 100%; }
+    #sidebar { width: 240px; background: #1a1a1a; color: #ddd; display: flex; flex-direction: column; }
+    #sidebar header { padding: 12px; font-weight: 600; border-bottom: 1px solid #333; }
+    #new { margin: 8px; padding: 8px; cursor: pointer; }
+    #list { flex: 1; overflow-y: auto; list-style: none; margin: 0; padding: 0; }
+    #list li { display: flex; align-items: center; justify-content: space-between; padding: 8px 12px; cursor: pointer; }
+    #list li.active { background: #333; }
+    #list li.dead { opacity: 0.5; }
+    #list .kill { border: none; background: transparent; color: #f66; cursor: pointer; font-size: 14px; }
+    #main { flex: 1; background: #000; }
+    #term { height: 100%; width: 100%; }
+  </style>
+</head>
+<body>
+  <div id="app">
+    <aside id="sidebar">
+      <header>Orchid</header>
+      <button id="new">+ New session</button>
+      <ul id="list"></ul>
+    </aside>
+    <main id="main"><div id="term"></div></main>
+  </div>
+  <script src="/vendor/xterm.js"></script>
+  <script src="/vendor/addon-fit.js"></script>
+  <script src="/app.js"></script>
+</body>
+</html>

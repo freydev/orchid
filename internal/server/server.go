@@ -1,18 +1,18 @@
 package server
 
 import (
+	"io/fs"
 	"net/http"
 
 	"orchid/internal/session"
+	"orchid/web"
 )
 
-// Server wires the HTTP API and (later) WebSocket + static assets.
 type Server struct {
 	mgr *session.Manager
 	mux *http.ServeMux
 }
 
-// New builds the HTTP handler. Static asset wiring is added in Task 8.
 func New(mgr *session.Manager) http.Handler {
 	s := &Server{mgr: mgr, mux: http.NewServeMux()}
 	s.routes()
@@ -24,4 +24,7 @@ func (s *Server) routes() {
 	s.mux.HandleFunc("POST /api/sessions", s.handleCreate)
 	s.mux.HandleFunc("DELETE /api/sessions/{id}", s.handleKill)
 	s.mux.HandleFunc("GET /ws/{id}", s.handleWS)
+
+	static, _ := fs.Sub(web.FS, ".")
+	s.mux.Handle("/", http.FileServer(http.FS(static)))
 }
