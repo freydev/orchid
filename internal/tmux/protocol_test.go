@@ -5,6 +5,23 @@ import (
 	"testing"
 )
 
+func TestTrimTrailingBlankLines(t *testing.T) {
+	cases := map[string]string{
+		"a\r\nb\r\n\r\n\r\n":                  "a\r\nb",                       // empty trailers dropped
+		"a\r\n   \r\n":                        "a",                            // space-only trailer dropped
+		"a\r\n\x1b[34m\x1b[39m\r\n":           "a",                            // escape-only trailer dropped
+		"prompt % \r\n   \r\n   \r\n":         "prompt % ",                    // keep content, drop blank tail
+		"x\r\ny":                              "x\r\ny",                       // no trailing blanks
+		"":                                    "",                             // empty stays empty
+		"\x1b[34m/tmp\x1b[39m  % \r\n\r\n\r\n": "\x1b[34m/tmp\x1b[39m  % ",     // real prompt line kept
+	}
+	for in, want := range cases {
+		if got := trimTrailingBlankLines([]byte(in)); string(got) != want {
+			t.Fatalf("trimTrailingBlankLines(%q) = %q, want %q", in, got, want)
+		}
+	}
+}
+
 func TestUnescapeOutput(t *testing.T) {
 	cases := map[string]string{
 		`echo MARK\015\012`: "echo MARK\r\n",

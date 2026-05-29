@@ -121,7 +121,9 @@ func (c *Control) Capture(lines int) ([]byte, error) {
 	if err != nil && len(block) == 0 {
 		return nil, err
 	}
-	return bytes.Join(block, []byte("\r\n")), nil
+	// Drop the blank rows capture-pane pads to the full pane height, so seeding
+	// doesn't push the prompt down with empty space above it.
+	return trimTrailingBlankLines(bytes.Join(block, []byte("\r\n"))), nil
 }
 
 // Start launches the streaming goroutine: %output -> Output() channel.

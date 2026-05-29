@@ -81,6 +81,44 @@ func unescapeOutput(in []byte) []byte {
 
 func isOctal(b byte) bool { return b >= '0' && b <= '7' }
 
+// trimTrailingBlankLines drops trailing CRLF-separated lines that render as
+// blank (only spaces/tabs and/or ANSI escape sequences). tmux capture-pane pads
+// output to the full pane height with blank rows; seeding those into xterm
+// pushes the cursor to the bottom and leaves empty space above the content.
+func trimTrailingBlankLines(b []byte) []byte {
+	if len(b) == 0 {
+		return b
+	}
+	lines := bytes.Split(b, []byte("\r\n"))
+	n := len(lines)
+	for n > 0 && isBlankLine(lines[n-1]) {
+		n--
+	}
+	return bytes.Join(lines[:n], []byte("\r\n"))
+}
+
+// isBlankLine reports whether a line has no visible content after removing CSI
+// escape sequences and whitespace.
+func isBlankLine(line []byte) bool {
+	for i := 0; i < len(line); i++ {
+		c := line[i]
+		if c == 0x1b { // ESC: skip a CSI sequence (ESC [ ... final 0x40-0x7e)
+			i++
+			if i < len(line) && line[i] == '[' {
+				i++
+				for i < len(line) && !(line[i] >= 0x40 && line[i] <= 0x7e) {
+					i++
+				}
+			}
+			continue
+		}
+		if c != ' ' && c != '\t' && c != '\r' {
+			return false
+		}
+	}
+	return true
+}
+
 // hexKeys formats bytes as space-separated lowercase hex pairs for send-keys -H.
 func hexKeys(b []byte) string {
 	parts := make([]string, len(b))
