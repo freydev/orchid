@@ -28,7 +28,7 @@ func TestEmbedFSContainsExpectedFiles(t *testing.T) {
 }
 
 func TestStaticFilesServed(t *testing.T) {
-	mgr := session.NewManager()
+	mgr := session.NewManager(t.TempDir() + "/sessions.json")
 	defer mgr.KillAll()
 	h := New(mgr)
 	srv := httptest.NewServer(h)

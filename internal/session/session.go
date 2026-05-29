@@ -6,6 +6,9 @@ import (
 	"sync"
 
 	"github.com/creack/pty"
+	"orchid/internal/agent"
+	"orchid/internal/store"
+	"orchid/internal/tmux"
 )
 
 const ringSize = 64 * 1024
@@ -18,7 +21,11 @@ type attachment struct {
 
 // Session wraps a shell running in a PTY.
 type Session struct {
-	ID string
+	ID             string
+	Agent          string
+	Cwd            string
+	Tmux           string
+	AgentSessionID string
 
 	cmd    *exec.Cmd
 	pty    *os.File
@@ -31,20 +38,44 @@ type Session struct {
 	doneOnce sync.Once
 }
 
-func newSession(id string, onExit func()) (*Session, error) {
-	shell := os.Getenv("SHELL")
-	if shell == "" {
-		shell = "/bin/bash"
+// createSession creates a NEW detached tmux session running the agent's fresh
+// command, then spawns the attach-PTY that views it.
+func createSession(rec store.Record, ag agent.Agent, onExit func()) (*Session, error) {
+	argv := ag.NewCommand(rec.Cwd, rec.AgentSessionID)
+	if err := tmux.NewSession(rec.Tmux, rec.Cwd, argv); err != nil {
+		return nil, err
 	}
-	cmd := exec.Command(shell)
+	return attachSession(rec, onExit)
+}
+
+// attachSession spawns the attach-PTY for an already-existing tmux session.
+func attachSession(rec store.Record, onExit func()) (*Session, error) {
+	attach := tmux.AttachArgv(rec.Tmux)
+	cmd := exec.Command(attach[0], attach[1:]...)
 	cmd.Env = append(os.Environ(), "TERM=xterm-256color")
 	f, err := pty.Start(cmd)
 	if err != nil {
 		return nil, err
 	}
-	s := &Session{ID: id, cmd: cmd, pty: f, ring: newRingBuffer(ringSize), onExit: onExit, alive: true}
-	go s.readLoop()
+	s := &Session{
+		ID:             rec.ID,
+		Agent:          rec.Agent,
+		Cwd:            rec.Cwd,
+		Tmux:           rec.Tmux,
+		AgentSessionID: rec.AgentSessionID,
+		cmd:            cmd,
+		pty:            f,
+		ring:           newRingBuffer(ringSize),
+		onExit:         onExit,
+		alive:          true,
+	}
 	return s, nil
+}
+
+// Start begins the PTY read loop. Call exactly once, after the session has
+// been registered with its owner, so onExit never races ahead of registration.
+func (s *Session) Start() {
+	go s.readLoop()
 }
 
 func (s *Session) readLoop() {

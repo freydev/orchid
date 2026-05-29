@@ -19,13 +19,33 @@
     #list .kill { border: none; background: transparent; color: #f66; cursor: pointer; font-size: 14px; }
     #main { flex: 1; background: #000; }
     #term { height: 100%; width: 100%; }
+    #create { padding: 8px; display: flex; flex-direction: column; gap: 4px; border-bottom: 1px solid #333; }
+    #create select, #create input, #create button { padding: 6px; }
+    #list li .meta { display: flex; flex-direction: column; }
+    #list li .sub { font-size: 11px; opacity: 0.6; }
+    #list .dot { width: 8px; height: 8px; border-radius: 50%; display: inline-block; margin-right: 6px; }
+    #list .dot.running { background: #6f6; }
+    #list .dot.stopped { background: #888; }
+    #list .btns { display: flex; gap: 4px; }
+    #list .btn { border: none; background: transparent; cursor: pointer; font-size: 14px; }
+    #list .restart { color: #6cf; }
+    #list .kill { color: #f66; }
+    #placeholder { color: #666; padding: 20px; font-family: system-ui, sans-serif; }
   </style>
 </head>
 <body>
   <div id="app">
     <aside id="sidebar">
       <header>Orchid</header>
-      <button id="new">+ New session</button>
+      <div id="create">
+        <select id="agent">
+          <option value="claude">claude</option>
+          <option value="codex">codex</option>
+          <option value="shell">shell</option>
+        </select>
+        <input id="cwd" type="text" placeholder="cwd (optional)" />
+        <button id="new">+ New</button>
+      </div>
       <ul id="list"></ul>
     </aside>
     <main id="main"><div id="term"></div></main>
