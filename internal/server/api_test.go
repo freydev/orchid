@@ -10,7 +10,7 @@ import (
 )
 
 func TestAPICreateListKill(t *testing.T) {
-	mgr := session.NewManager()
+	mgr := session.NewManager(t.TempDir() + "/sessions.json")
 	defer mgr.KillAll()
 	h := New(mgr)
 	srv := httptest.NewServer(h)
@@ -59,7 +59,7 @@ func TestAPICreateListKill(t *testing.T) {
 }
 
 func TestAPIKillUnknownReturns404(t *testing.T) {
-	mgr := session.NewManager()
+	mgr := session.NewManager(t.TempDir() + "/sessions.json")
 	h := New(mgr)
 	srv := httptest.NewServer(h)
 	defer srv.Close()

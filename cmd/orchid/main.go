@@ -5,10 +5,13 @@ import (
 	"log"
 	"net"
 	"net/http"
+	"os"
+	"path/filepath"
 	"strconv"
 
 	"orchid/internal/server"
 	"orchid/internal/session"
+	"orchid/internal/store"
 )
 
 func main() {
@@ -18,7 +21,15 @@ func main() {
 
 	addr := net.JoinHostPort(*host, strconv.Itoa(*port))
 
-	mgr := session.NewManager()
+	sessPath, err := store.DefaultPath()
+	if err != nil {
+		cfg, _ := os.UserConfigDir()
+		sessPath = filepath.Join(cfg, "orchid", "sessions.json")
+	}
+	mgr := session.NewManager(sessPath)
+	if err := mgr.Restore(); err != nil {
+		log.Printf("orchid: restore sessions: %v", err)
+	}
 	defer mgr.KillAll()
 
 	h := server.New(mgr)

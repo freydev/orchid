@@ -12,13 +12,13 @@ import (
 )
 
 func TestWSEchoAndUnknown404(t *testing.T) {
-	mgr := session.NewManager()
+	mgr := session.NewManager(t.TempDir() + "/sessions.json")
 	defer mgr.KillAll()
 	h := New(mgr)
 	srv := httptest.NewServer(h)
 	defer srv.Close()
 
-	sess, _ := mgr.Create()
+	sess, _ := mgr.Create("shell", "")
 	wsURL := "ws" + strings.TrimPrefix(srv.URL, "http") + "/ws/" + sess.ID
 
 	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
