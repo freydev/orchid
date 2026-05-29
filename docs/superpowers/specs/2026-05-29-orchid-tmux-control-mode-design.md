@@ -28,7 +28,9 @@ Verified facts driving this milestone:
 ## Goals
 
 - Replace the `tmux attach` pass-through PTY with a tmux **control-mode client**
-  (`tmux -CC attach`, stdin/stdout pipes, no PTY) per session.
+  (`tmux -CC attach`) per session. (Verified: `-CC` requires a PTY — `tcgetattr`
+  fails over plain pipes — so the control client still runs under a creack/pty
+  PTY; we read the line-based control protocol from it and write commands to it.)
 - Browser xterm.js uses its **normal** buffer with real scrollback — native
   scrollbar and mouse wheel scroll history with no JS hacks.
 - Keep all milestone-2 persistence: sessions survive WS disconnect AND orchid
@@ -76,8 +78,10 @@ Why this resolves the milestone-2 problems:
 ## Component: internal/tmux — Control client
 
 `NewSession` stays (creates the detached tmux session) but drops the `mouse on`
-call; it additionally sets `window-size manual` (so `refresh-client -C` controls
-the pane size) for orchid sessions.
+call; it additionally sets `window-size latest` for orchid sessions so that
+`refresh-client -C <cols>x<rows>` from the control client drives the pane size.
+(Verified: `window-size manual` makes tmux ignore `refresh-client -C`; `latest`
+resizes correctly.)
 
 ```go
 // Control is a tmux control-mode client (tmux -CC attach) for one session.
@@ -180,8 +184,10 @@ output, `/api/sessions` + `/ws/{id}` + `/restart`).
 - Pane-id discovery failure → `Attach` returns error → creation/restore marks the
   session failed/stopped.
 - `Capture` seed failure on reattach → logged; continue with empty history.
-- `refresh-client -C` requires `window-size manual` (set at session create) to
-  resize the pane.
+- `refresh-client -C` requires `window-size latest` (set at session create); with
+  `manual` tmux ignores the control client's size.
+- The control protocol stream opens with a `\x1bP1000p` DCS marker and closes with
+  `\x1b\\` (ST); the parser strips a leading `\x1bP…p` and ignores the ST.
 
 ## Testing
 
