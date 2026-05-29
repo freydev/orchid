@@ -1,6 +1,10 @@
 package tmux
 
-import "testing"
+import (
+	"os/exec"
+	"strings"
+	"testing"
+)
 
 func skipIfNoTmux(t *testing.T) {
 	t.Helper()
@@ -42,5 +46,23 @@ func TestSessionRoundtrip(t *testing.T) {
 	}
 	if HasSession(name) {
 		t.Fatal("session should be gone after KillSession")
+	}
+}
+
+func TestNewSessionEnablesMouse(t *testing.T) {
+	skipIfNoTmux(t)
+	name := "orchid-test-mouse"
+	_ = KillSession(name)
+	defer KillSession(name)
+
+	if err := NewSession(name, "/tmp", []string{"sleep", "60"}); err != nil {
+		t.Fatalf("NewSession: %v", err)
+	}
+	out, err := exec.Command("tmux", "show-options", "-t", name, "mouse").CombinedOutput()
+	if err != nil {
+		t.Fatalf("show-options: %v: %s", err, out)
+	}
+	if !strings.Contains(string(out), "mouse on") {
+		t.Fatalf("expected mouse on for orchid session, got %q", out)
 	}
 }
