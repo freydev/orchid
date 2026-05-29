@@ -135,7 +135,7 @@ function attachTerminal(id) {
   host.innerHTML =
     '<div class="term" style="flex:1;min-height:0">' +
       '<div class="term-head">' +
-        '<div class="agent-badge ' + s.agent + '">' + m.badge + "</div>" +
+        '<div class="agent-badge ' + _.escape(s.agent) + '">' + m.badge + "</div>" +
         '<div class="term-id"><div class="t">' + _.escape(m.label) + "</div></div>" +
         '<span class="tt">' + m.cmd + '</span><div class="spacer"></div>' +
         '<span class="status-pill ' + st.cls + '"><span class="dot ' + st.cls + (st.pulse ? " pulse" : "") + '"></span>' + st.label + "</span>" +
@@ -216,7 +216,7 @@ main.addEventListener("click", async (e) => {
     const id = holder ? holder.dataset.id : activeId;
     if (actBtn.dataset.act === "kill") {
       await fetch("/api/sessions/" + id, { method: "DELETE" });
-      if (id === activeId) { teardownTerm(); view = "list"; }
+      if (id === activeId) { teardownTerm(); view = "list"; activeId = null; }
       await refresh();
     } else if (actBtn.dataset.act === "restart") {
       const r = await fetch("/api/sessions/" + id + "/restart", { method: "POST" });
