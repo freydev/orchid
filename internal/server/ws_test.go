@@ -3,11 +3,13 @@ package server
 import (
 	"context"
 	"net/http/httptest"
+	"path/filepath"
 	"strings"
 	"testing"
 	"time"
 
 	"github.com/coder/websocket"
+	"orchid/internal/project"
 	"orchid/internal/session"
 	"orchid/internal/tmux"
 )
@@ -18,7 +20,7 @@ func TestWSEchoAndUnknown404(t *testing.T) {
 	}
 	mgr := session.NewManager(t.TempDir() + "/sessions.json")
 	t.Cleanup(mgr.KillAll)
-	h := New(mgr)
+	h := New(mgr, project.New(filepath.Join(t.TempDir(), "projects.json")))
 	srv := httptest.NewServer(h)
 	defer srv.Close()
 

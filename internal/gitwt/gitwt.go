@@ -68,7 +68,8 @@ func parseList(out []byte) []Worktree {
 func sani(branch string) string { return strings.ReplaceAll(branch, "/", "-") }
 
 // Add creates a new worktree on a NEW branch (off current HEAD) under
-// <repo>/.orchid/worktrees/<sani(branch)>. Returns the worktree's absolute path.
+// <repo>/.orchid/worktrees/<sani(branch)>. Returns the worktree's absolute path
+// with symlinks resolved (matching the output of git worktree list).
 func Add(repo, branch string) (string, error) {
 	if strings.TrimSpace(branch) == "" {
 		return "", fmt.Errorf("branch is required")
@@ -77,6 +78,10 @@ func Add(repo, branch string) (string, error) {
 	out, err := exec.Command("git", "-C", repo, "worktree", "add", path, "-b", branch).CombinedOutput()
 	if err != nil {
 		return "", fmt.Errorf("git worktree add: %w: %s", err, out)
+	}
+	// Resolve symlinks so the returned path matches git worktree list output.
+	if real, err := filepath.EvalSymlinks(path); err == nil {
+		path = real
 	}
 	return path, nil
 }

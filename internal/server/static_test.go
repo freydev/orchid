@@ -5,9 +5,11 @@ import (
 	"io/fs"
 	"net/http"
 	"net/http/httptest"
+	"path/filepath"
 	"strings"
 	"testing"
 
+	"orchid/internal/project"
 	"orchid/internal/session"
 	"orchid/web"
 )
@@ -30,7 +32,7 @@ func TestEmbedFSContainsExpectedFiles(t *testing.T) {
 func TestStaticFilesServed(t *testing.T) {
 	mgr := session.NewManager(t.TempDir() + "/sessions.json")
 	defer mgr.KillAll()
-	h := New(mgr)
+	h := New(mgr, project.New(filepath.Join(t.TempDir(), "projects.json")))
 	srv := httptest.NewServer(h)
 	defer srv.Close()
 

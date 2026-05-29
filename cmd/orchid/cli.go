@@ -19,6 +19,7 @@ import (
 	"time"
 
 	"orchid/internal/client"
+	"orchid/internal/project"
 	"orchid/internal/runtime"
 	"orchid/internal/server"
 	"orchid/internal/session"
@@ -66,6 +67,11 @@ func sessionsPath() string {
 	return p
 }
 
+func projectsPath() string {
+	cfg, _ := os.UserConfigDir()
+	return filepath.Join(cfg, "orchid", "projects.json")
+}
+
 func hostPort(args []string) (string, int, error) {
 	fs := flag.NewFlagSet("serve", flag.ContinueOnError)
 	host := fs.String("host", "127.0.0.1", "listen host (localhost only by default)")
@@ -91,7 +97,11 @@ func serveCmd(args []string) int {
 	if err := mgr.Restore(); err != nil {
 		log.Printf("orchid: restore sessions: %v", err)
 	}
-	srv := &http.Server{Addr: addr, Handler: server.New(mgr)}
+	ps := project.New(projectsPath())
+	if err := ps.Load(); err != nil {
+		log.Printf("orchid: restore projects: %v", err)
+	}
+	srv := &http.Server{Addr: addr, Handler: server.New(mgr, ps)}
 
 	ctx, stop := signal.NotifyContext(context.Background(), syscall.SIGTERM, syscall.SIGINT)
 	defer stop()
