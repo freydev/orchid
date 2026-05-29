@@ -110,7 +110,7 @@ function selectSession(id) {
   termEl.innerHTML = "";
   activeId = id;
 
-  term = new Terminal({ cursorBlink: true, fontSize: 14 });
+  term = new Terminal({ cursorBlink: true, fontSize: 14, scrollback: 5000 });
   fit = new FitAddon.FitAddon();
   term.loadAddon(fit);
   term.open(termEl);

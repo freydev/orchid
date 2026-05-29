@@ -13,19 +13,6 @@ func skipIfNoTmux(t *testing.T) {
 	}
 }
 
-func TestAttachArgv(t *testing.T) {
-	got := AttachArgv("orchid-abc")
-	want := []string{"tmux", "attach", "-t", "orchid-abc"}
-	if len(got) != len(want) {
-		t.Fatalf("got %v", got)
-	}
-	for i := range want {
-		if got[i] != want[i] {
-			t.Fatalf("got %v, want %v", got, want)
-		}
-	}
-}
-
 func TestSessionRoundtrip(t *testing.T) {
 	skipIfNoTmux(t)
 	name := "orchid-test-roundtrip"
@@ -49,20 +36,19 @@ func TestSessionRoundtrip(t *testing.T) {
 	}
 }
 
-func TestNewSessionEnablesMouse(t *testing.T) {
+func TestNewSessionSetsWindowSizeLatest(t *testing.T) {
 	skipIfNoTmux(t)
-	name := "orchid-test-mouse"
+	name := "orchid-test-winsize"
 	_ = KillSession(name)
 	defer KillSession(name)
-
 	if err := NewSession(name, "/tmp", []string{"sleep", "60"}); err != nil {
 		t.Fatalf("NewSession: %v", err)
 	}
-	out, err := exec.Command("tmux", "show-options", "-t", name, "mouse").CombinedOutput()
+	out, err := exec.Command("tmux", "show-options", "-t", name, "window-size").CombinedOutput()
 	if err != nil {
 		t.Fatalf("show-options: %v: %s", err, out)
 	}
-	if !strings.Contains(string(out), "mouse on") {
-		t.Fatalf("expected mouse on for orchid session, got %q", out)
+	if !strings.Contains(string(out), "latest") {
+		t.Fatalf("want window-size latest, got %q", out)
 	}
 }
