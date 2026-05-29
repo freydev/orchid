@@ -4,14 +4,33 @@ import (
 	"bytes"
 	"testing"
 	"time"
+
+	"orchid/internal/agent"
+	"orchid/internal/store"
+	"orchid/internal/tmux"
 )
 
-func TestSessionEchoesToRing(t *testing.T) {
-	s, err := newSession("test1", nil)
-	if err != nil {
-		t.Fatalf("newSession: %v", err)
+// newTestSession creates a real tmux-backed shell session for tests, skipping
+// if tmux is unavailable. It registers cleanup that kills the tmux session.
+func newTestSession(t *testing.T, id string) *Session {
+	t.Helper()
+	if err := tmux.Available(); err != nil {
+		t.Skipf("tmux not available: %v", err)
 	}
-	defer s.Close()
+	name := "orchid-" + id
+	_ = tmux.KillSession(name)
+	rec := store.Record{ID: id, Agent: "shell", Cwd: "/tmp", Tmux: name, Status: "running"}
+	sh, _ := agent.Get("shell")
+	s, err := createSession(rec, sh, nil)
+	if err != nil {
+		t.Fatalf("createSession: %v", err)
+	}
+	t.Cleanup(func() { s.Close(); tmux.KillSession(name) })
+	return s
+}
+
+func TestSessionEchoesToRing(t *testing.T) {
+	s := newTestSession(t, "test1")
 
 	if _, err := s.Write([]byte("echo orchid_marker\n")); err != nil {
 		t.Fatalf("write: %v", err)
@@ -31,10 +50,8 @@ func TestSessionEchoesToRing(t *testing.T) {
 }
 
 func TestSessionAliveFlips(t *testing.T) {
-	s, err := newSession("test2", nil)
-	if err != nil {
-		t.Fatalf("newSession: %v", err)
-	}
+	s := newTestSession(t, "test2")
+
 	if !s.Alive() {
 		t.Fatal("expected alive immediately after start")
 	}
@@ -50,11 +67,7 @@ func TestSessionAliveFlips(t *testing.T) {
 }
 
 func TestSessionAttachReceivesOutput(t *testing.T) {
-	s, err := newSession("test3", nil)
-	if err != nil {
-		t.Fatalf("newSession: %v", err)
-	}
-	defer s.Close()
+	s := newTestSession(t, "test3")
 
 	a := s.Attach()
 	defer s.Detach(a)
@@ -79,11 +92,7 @@ func TestSessionAttachReceivesOutput(t *testing.T) {
 }
 
 func TestSessionAttachKicksPrevious(t *testing.T) {
-	s, err := newSession("test4", nil)
-	if err != nil {
-		t.Fatalf("newSession: %v", err)
-	}
-	defer s.Close()
+	s := newTestSession(t, "test4")
 
 	a1 := s.Attach()
 	a2 := s.Attach() // should kick a1
