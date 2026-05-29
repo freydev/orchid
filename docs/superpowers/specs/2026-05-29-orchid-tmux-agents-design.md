@@ -91,14 +91,17 @@ Concrete agents:
 | Agent  | NewCommand                          | ResumeCommand                   |
 |--------|-------------------------------------|---------------------------------|
 | claude | `claude --session-id <uuid>`        | `claude --resume <uuid>`        |
-| codex  | (verified at impl; bind id)         | (verified at impl; resume id)   |
+| codex  | `codex`                             | `codex resume --last`           |
 | shell  | `$SHELL` (fallback `/bin/bash`)     | nil (restart = fresh shell)     |
 
-**codex flags:** the exact codex CLI flags for binding/resuming a session id MUST
-be verified against the installed `codex --help` during implementation. The
-`Agent` interface does not change; only the codex struct's argv differs. If codex
-cannot bind a caller-supplied id, document the limitation and fall back to
-resume-last semantics for codex only, leaving claude/shell as specified.
+**codex limitation (verified against codex CLI):** codex interactive has no flag
+to bind a caller-supplied session id at fresh start — it generates its own id —
+and `codex resume <id>` would need an id we never observe. So codex ignores the
+generated `agentSessionID` and resumes via `codex resume --last` (the most recent
+codex session). This is a known imperfection (it resumes codex's globally-latest
+session, which is usually but not guaranteed to be this orchid session). claude
+binds and resumes a specific id as specified; shell has no resume. cwd is set for
+every agent via tmux's `-c` flag (no agent needs a `--cd` argument).
 
 cwd resolution lives in `ResolveCwd` (single place): empty string → `$HOME`.
 Designed so role-based defaults can replace this later without touching callers.
