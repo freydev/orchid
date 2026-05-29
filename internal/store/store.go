@@ -20,11 +20,18 @@ type Record struct {
 	Status         string    `json:"status"` // "running" | "stopped"
 }
 
-// DefaultPath returns <user config dir>/orchid/sessions.json.
+// DefaultPath returns the sessions file under ~/.config/orchid (honoring
+// $XDG_CONFIG_HOME when set). We use ~/.config explicitly rather than
+// os.UserConfigDir() so the location is consistent across platforms (on macOS
+// UserConfigDir would be ~/Library/Application Support).
 func DefaultPath() (string, error) {
-	cfg, err := os.UserConfigDir()
-	if err != nil {
-		return "", err
+	cfg := os.Getenv("XDG_CONFIG_HOME")
+	if cfg == "" {
+		home, err := os.UserHomeDir()
+		if err != nil {
+			return "", err
+		}
+		cfg = filepath.Join(home, ".config")
 	}
 	return filepath.Join(cfg, "orchid", "sessions.json"), nil
 }

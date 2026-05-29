@@ -7,6 +7,27 @@ import (
 	"time"
 )
 
+func TestDefaultPathUsesConfig(t *testing.T) {
+	t.Setenv("XDG_CONFIG_HOME", "/cfg")
+	got, err := DefaultPath()
+	if err != nil {
+		t.Fatalf("DefaultPath: %v", err)
+	}
+	if got != "/cfg/orchid/sessions.json" {
+		t.Fatalf("with XDG_CONFIG_HOME: got %q", got)
+	}
+
+	t.Setenv("XDG_CONFIG_HOME", "")
+	t.Setenv("HOME", "/home/tester")
+	got, err = DefaultPath()
+	if err != nil {
+		t.Fatalf("DefaultPath: %v", err)
+	}
+	if got != "/home/tester/.config/orchid/sessions.json" {
+		t.Fatalf("fallback: got %q", got)
+	}
+}
+
 func TestLoadMissingReturnsEmpty(t *testing.T) {
 	recs, err := Load(filepath.Join(t.TempDir(), "nope.json"))
 	if err != nil {
