@@ -272,7 +272,7 @@ input { font-family: inherit; }
 .empty .big { font-size: 15px; color: var(--text-dim); margin-bottom: 6px; }
 
 /* grid of terminals */
-.term-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(380px, 1fr)); gap: 12px; }
+.term-grid { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 12px; }
 .term-grid.cols-1 { grid-template-columns: 1fr; }
 .term-pane { border: 1px solid var(--border); border-radius: var(--radius); overflow: hidden; display: flex; flex-direction: column; height: 300px; }
 
