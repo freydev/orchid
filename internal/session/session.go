@@ -30,6 +30,7 @@ type Session struct {
 	cmd    *exec.Cmd
 	pty    *os.File
 	ring   *ringBuffer
+	qf     queryFilter
 	onExit func()
 
 	mu       sync.Mutex
@@ -83,7 +84,9 @@ func (s *Session) readLoop() {
 	for {
 		n, err := s.pty.Read(buf)
 		if n > 0 {
-			s.broadcast(buf[:n])
+			if cleaned := s.qf.Filter(buf[:n]); len(cleaned) > 0 {
+				s.broadcast(cleaned)
+			}
 		}
 		if err != nil {
 			break
