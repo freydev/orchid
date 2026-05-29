@@ -1,17 +1,14 @@
 package session
 
 import (
-	"os"
-	"os/exec"
 	"sync"
 
-	"github.com/creack/pty"
 	"orchid/internal/agent"
 	"orchid/internal/store"
 	"orchid/internal/tmux"
 )
 
-const ringSize = 64 * 1024
+const ringSize = 1 << 20 // 1 MiB: ring now holds linear program history
 
 // attachment is a single live WebSocket subscriber.
 type attachment struct {
@@ -19,7 +16,7 @@ type attachment struct {
 	done chan struct{}
 }
 
-// Session wraps a shell running in a PTY.
+// Session streams one tmux pane (via a control-mode client) to a WS client.
 type Session struct {
 	ID             string
 	Agent          string
@@ -27,20 +24,21 @@ type Session struct {
 	Tmux           string
 	AgentSessionID string
 
-	cmd    *exec.Cmd
-	pty    *os.File
+	ctl    *tmux.Control
 	ring   *ringBuffer
-	qf     queryFilter
 	onExit func()
 
 	mu       sync.Mutex
 	alive    bool
-	sub      *attachment // currently attached WS, or nil
+	sub      *attachment
 	doneOnce sync.Once
 }
 
+// historyLines is how much scrollback to seed from tmux on (re)attach.
+const historyLines = 2000
+
 // createSession creates a NEW detached tmux session running the agent's fresh
-// command, then spawns the attach-PTY that views it.
+// command, then attaches a control-mode client.
 func createSession(rec store.Record, ag agent.Agent, onExit func()) (*Session, error) {
 	argv := ag.NewCommand(rec.Cwd, rec.AgentSessionID)
 	if err := tmux.NewSession(rec.Tmux, rec.Cwd, argv); err != nil {
@@ -49,48 +47,39 @@ func createSession(rec store.Record, ag agent.Agent, onExit func()) (*Session, e
 	return attachSession(rec, onExit)
 }
 
-// attachSession spawns the attach-PTY for an already-existing tmux session.
+// attachSession attaches a control-mode client to an existing tmux session and
+// seeds the ring with prior scrollback so reconnects show history.
 func attachSession(rec store.Record, onExit func()) (*Session, error) {
-	attach := tmux.AttachArgv(rec.Tmux)
-	cmd := exec.Command(attach[0], attach[1:]...)
-	cmd.Env = append(os.Environ(), "TERM=xterm-256color")
-	f, err := pty.Start(cmd)
+	ctl, err := tmux.Attach(rec.Tmux)
 	if err != nil {
 		return nil, err
 	}
-	s := &Session{
+	ring := newRingBuffer(ringSize)
+	if hist, err := ctl.Capture(historyLines); err == nil && len(hist) > 0 {
+		ring.Write(hist)
+	}
+	return &Session{
 		ID:             rec.ID,
 		Agent:          rec.Agent,
 		Cwd:            rec.Cwd,
 		Tmux:           rec.Tmux,
 		AgentSessionID: rec.AgentSessionID,
-		cmd:            cmd,
-		pty:            f,
-		ring:           newRingBuffer(ringSize),
+		ctl:            ctl,
+		ring:           ring,
 		onExit:         onExit,
 		alive:          true,
-	}
-	return s, nil
+	}, nil
 }
 
-// Start begins the PTY read loop. Call exactly once, after the session has
-// been registered with its owner, so onExit never races ahead of registration.
+// Start begins streaming pane output. Call once, after registration.
 func (s *Session) Start() {
+	s.ctl.Start()
 	go s.readLoop()
 }
 
 func (s *Session) readLoop() {
-	buf := make([]byte, 4096)
-	for {
-		n, err := s.pty.Read(buf)
-		if n > 0 {
-			if cleaned := s.qf.Filter(buf[:n]); len(cleaned) > 0 {
-				s.broadcast(cleaned)
-			}
-		}
-		if err != nil {
-			break
-		}
+	for data := range s.ctl.Output() {
+		s.broadcast(data)
 	}
 	s.mu.Lock()
 	s.alive = false
@@ -99,7 +88,6 @@ func (s *Session) readLoop() {
 		s.sub = nil
 	}
 	s.mu.Unlock()
-	s.Close()
 	if s.onExit != nil {
 		s.onExit()
 	}
@@ -122,11 +110,14 @@ func (s *Session) broadcast(p []byte) {
 }
 
 func (s *Session) Write(p []byte) (int, error) {
-	return s.pty.Write(p)
+	if err := s.ctl.SendKeys(p); err != nil {
+		return 0, err
+	}
+	return len(p), nil
 }
 
 func (s *Session) Resize(cols, rows uint16) error {
-	return pty.Setsize(s.pty, &pty.Winsize{Cols: cols, Rows: rows})
+	return s.ctl.Resize(cols, rows)
 }
 
 func (s *Session) Alive() bool {
@@ -135,15 +126,9 @@ func (s *Session) Alive() bool {
 	return s.alive
 }
 
-// Close terminates the shell and PTY.
+// Close terminates the control client. The tmux session survives.
 func (s *Session) Close() {
-	s.doneOnce.Do(func() {
-		_ = s.pty.Close()
-		if s.cmd.Process != nil {
-			_ = s.cmd.Process.Kill()
-		}
-		go func() { _ = s.cmd.Wait() }()
-	})
+	s.doneOnce.Do(func() { _ = s.ctl.Close() })
 }
 
 // Attach registers a new live subscriber, kicking any previous one.
