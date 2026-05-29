@@ -8,12 +8,16 @@ import (
 	"net"
 	"net/http"
 	"os"
+	exec "os/exec"
 	"os/signal"
 	"path/filepath"
 	"strconv"
 	"strings"
 	"syscall"
+	"time"
 
+	"orchid/internal/client"
+	"orchid/internal/runtime"
 	"orchid/internal/server"
 	"orchid/internal/session"
 	"orchid/internal/store"
@@ -104,10 +108,100 @@ func serveCmd(args []string) int {
 	return 0
 }
 
-// --- stubs filled in later tasks ---
-func startCmd(args []string) int   { fmt.Fprintln(os.Stderr, "not implemented"); return 1 }
-func stopCmd(args []string) int    { fmt.Fprintln(os.Stderr, "not implemented"); return 1 }
-func statusCmd(args []string) int  { fmt.Fprintln(os.Stderr, "not implemented"); return 1 }
+func startCmd(args []string) int {
+	host, port, err := hostPort(args)
+	if err != nil {
+		return 2
+	}
+	addr := net.JoinHostPort(host, strconv.Itoa(port))
+
+	if info, err := runtime.Read(); err == nil && runtime.Alive(info.PID) {
+		fmt.Fprintf(os.Stderr, "orchid: already running on http://%s\n", info.Addr)
+		return 1
+	}
+
+	self, err := os.Executable()
+	if err != nil {
+		fmt.Fprintln(os.Stderr, "orchid:", err)
+		return 1
+	}
+	logPath := filepath.Join(filepath.Dir(sessionsPath()), "orchid.log")
+	logf, err := os.OpenFile(logPath, os.O_CREATE|os.O_WRONLY|os.O_APPEND, 0o644)
+	if err != nil {
+		fmt.Fprintln(os.Stderr, "orchid:", err)
+		return 1
+	}
+	defer logf.Close()
+
+	cmd := exec.Command(self, "serve", "-host", host, "-port", strconv.Itoa(port))
+	cmd.Stdout = logf
+	cmd.Stderr = logf
+	cmd.SysProcAttr = &syscall.SysProcAttr{Setsid: true}
+	if err := cmd.Start(); err != nil {
+		fmt.Fprintln(os.Stderr, "orchid:", err)
+		return 1
+	}
+
+	listening := false
+	for i := 0; i < 30; i++ {
+		conn, derr := net.DialTimeout("tcp", addr, 200*time.Millisecond)
+		if derr == nil {
+			conn.Close()
+			listening = true
+			break
+		}
+		time.Sleep(100 * time.Millisecond)
+	}
+	if !listening {
+		_ = cmd.Process.Kill()
+		fmt.Fprintf(os.Stderr, "orchid: server did not start; see %s\n", logPath)
+		return 1
+	}
+	if err := runtime.Write(runtime.Info{PID: cmd.Process.Pid, Addr: addr}); err != nil {
+		fmt.Fprintln(os.Stderr, "orchid:", err)
+		return 1
+	}
+	fmt.Printf("orchid started on http://%s\n", addr)
+	return 0
+}
+
+func stopCmd(args []string) int {
+	info, err := runtime.Read()
+	if err != nil || !runtime.Alive(info.PID) {
+		_ = runtime.Remove()
+		fmt.Println("orchid not running")
+		return 0
+	}
+	if err := syscall.Kill(info.PID, syscall.SIGTERM); err != nil {
+		fmt.Fprintln(os.Stderr, "orchid:", err)
+		return 1
+	}
+	for i := 0; i < 30 && runtime.Alive(info.PID); i++ {
+		time.Sleep(100 * time.Millisecond)
+	}
+	if runtime.Alive(info.PID) {
+		_ = syscall.Kill(info.PID, syscall.SIGKILL)
+	}
+	_ = runtime.Remove()
+	fmt.Println("orchid stopped")
+	return 0
+}
+
+func statusCmd(args []string) int {
+	info, err := runtime.Read()
+	if err != nil || !runtime.Alive(info.PID) {
+		_ = runtime.Remove()
+		fmt.Println("orchid: not running")
+		return 0
+	}
+	fmt.Printf("orchid: running on http://%s (pid %d)\n", info.Addr, info.PID)
+	if c, err := client.FromRuntime(); err == nil {
+		if sessions, err := c.List(); err == nil {
+			fmt.Printf("sessions: %d\n", len(sessions))
+		}
+	}
+	return 0
+}
 func openCmd(args []string) int    { fmt.Fprintln(os.Stderr, "not implemented"); return 1 }
 func lsCmd(args []string) int      { fmt.Fprintln(os.Stderr, "not implemented"); return 1 }
 func createCmd(args []string) int  { fmt.Fprintln(os.Stderr, "not implemented"); return 1 }
