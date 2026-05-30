@@ -1,0 +1,7 @@
+{
+  "database": "dolt",
+  "backend": "dolt",
+  "dolt_mode": "embedded",
+  "dolt_database": "orchid_3",
+  "project_id": "c2c6f13a-d1e6-453e-b682-2d3540c8f7b8"
+}
