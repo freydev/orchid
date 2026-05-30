@@ -137,3 +137,17 @@ internal/session/manager.go    # MODIFIED: Info.Status resolution (working/idle/
 internal/session/*_test.go     # status resolution + Active tests
 web/app.js                     # MODIFIED: 4-state statusMeta + in-place status poll
 ```
+
+---
+
+## POSTMORTEM (2026-05-30) — implementation dropped, statuses need rethinking
+
+The `feat/activity-status` branch implementing this spec was **discarded**. `working`/`idle`/`stopped` worked, but `requires_action` could not be made to work, for reasons found by reproducing real claude sessions:
+
+1. **claude auto-approves tools here.** Even with `--permission-mode default`, claude ran `Bash(echo …)` with no "Do you want to proceed?" prompt. So claude essentially never sits *blocked awaiting approval* — the state this spec aimed to detect. (Dangerous-op prompts may still occur, but the common flow never blocks.)
+2. **The JSONL heuristic was wrong AND insufficient.** claude writes tool-call messages with `stop_reason="end_turn"` (not always `"tool_use"`), so the `stop_reason=="tool_use"` check would miss them. And with auto-approve, a `tool_result` follows immediately, so there is never a lingering trailing tool call.
+3. **"claude is waiting on you" is structurally identical to idle.** When claude asks a clarifying question and awaits the user, the transcript's last message is `assistant stop_reason=end_turn [text]` and the screen shows a plain empty `❯` prompt — **indistinguishable** from "claude finished a task and is idle." No observable signal separates `requires_action` from `idle` (transcript or screen).
+
+**Implication for a future design:** there is no reliable signal that distinguishes "agent needs your input" from "agent idle" via JSONL or screen under auto-approve. The realistic reframe (not yet adopted): for **agents** (claude/codex), *quiet == needs your input* (an idle agent is awaiting you) → treat agent-idle as the "needs attention" state; shell-idle stays plain idle. This is pure activity + agent-type (cheap, reliable, no transcript parsing). Decide this deliberately when revisiting.
+
+`working`/`idle` (from the in-memory `lastOutput` activity timestamp) DID work reliably and cheaply and are worth keeping in any redesign.
