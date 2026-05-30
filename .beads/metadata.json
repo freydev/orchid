@@ -1,7 +1,9 @@
 {
   "database": "dolt",
   "backend": "dolt",
-  "dolt_mode": "embedded",
-  "dolt_database": "orchid_3",
-  "project_id": "c2c6f13a-d1e6-453e-b682-2d3540c8f7b8"
+  "dolt_mode": "server",
+  "dolt_server_host": "127.0.0.1",
+  "dolt_server_port": 12297,
+  "dolt_database": "or",
+  "project_id": "afb3675c-69d5-49d9-8563-d200cf1550d7"
 }
