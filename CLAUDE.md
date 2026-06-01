@@ -60,13 +60,7 @@ This protocol applies when ending a Beads implementation workflow. It is subordi
 
 ## Build & Test
 
-_Add your build and test commands here_
-
-```bash
-# Example:
-# npm install
-# npm test
-```
+DON'T erese sessions.json and other already existed sessions during test
 
 ## Architecture Overview
 
