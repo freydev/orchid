@@ -4,6 +4,7 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"strings"
 	"testing"
 )
 
@@ -47,6 +48,62 @@ func gitRepo(t *testing.T) string {
 		}
 	}
 	return d
+}
+
+func git(t *testing.T, repo string, args ...string) string {
+	t.Helper()
+	out, err := exec.Command("git", append([]string{"-C", repo}, args...)...).CombinedOutput()
+	if err != nil {
+		t.Fatalf("git %v: %v: %s", args, err, out)
+	}
+	return string(out)
+}
+
+// New worktrees must branch off the default branch, not whatever HEAD happens
+// to be checked out.
+func TestAddOffDefaultBranch(t *testing.T) {
+	repo := gitRepo(t)
+	def := DefaultBranch(repo)
+	defHead := strings.TrimSpace(git(t, repo, "rev-parse", def))
+
+	// Move HEAD onto a side branch with an extra commit ahead of default.
+	git(t, repo, "checkout", "-q", "-b", "side")
+	git(t, repo, "-c", "user.email=t@t", "-c", "user.name=t", "commit", "--allow-empty", "-q", "-m", "side")
+	sideHead := strings.TrimSpace(git(t, repo, "rev-parse", "HEAD"))
+	if sideHead == defHead {
+		t.Fatal("side commit did not advance HEAD")
+	}
+
+	path, err := Add(repo, "feat/demo")
+	if err != nil {
+		t.Fatalf("Add: %v", err)
+	}
+	got := strings.TrimSpace(git(t, repo, "-C", path, "rev-parse", "HEAD"))
+	if got != defHead {
+		t.Fatalf("worktree based on %s, want default %s (side was %s)", got, defHead, sideHead)
+	}
+}
+
+func TestGitInfoNoOrigin(t *testing.T) {
+	repo := gitRepo(t)
+	if !IsRepo(repo) {
+		t.Fatal("IsRepo = false for a git repo")
+	}
+	if HasOrigin(repo) {
+		t.Fatal("HasOrigin = true with no remote configured")
+	}
+	if DefaultBranch(repo) == "" || DefaultBranch(repo) == "HEAD" {
+		t.Fatalf("DefaultBranch = %q, want a real branch", DefaultBranch(repo))
+	}
+}
+
+func TestIsRepoNonRepo(t *testing.T) {
+	if Available() != nil {
+		t.Skip("git not available")
+	}
+	if IsRepo(t.TempDir()) {
+		t.Fatal("IsRepo = true for a non-git directory")
+	}
 }
 
 func TestAddListRemove(t *testing.T) {

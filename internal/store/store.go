@@ -12,6 +12,7 @@ import (
 // reconciles it against live tmux on load.
 type Record struct {
 	ID             string    `json:"id"`
+	Name           string    `json:"name,omitempty"`
 	Agent          string    `json:"agent"`
 	Cwd            string    `json:"cwd"`
 	Project        string    `json:"project"`
@@ -20,6 +21,9 @@ type Record struct {
 	AgentSessionID string    `json:"agent_session_id"`
 	Created        time.Time `json:"created"`
 	Status         string    `json:"status"` // "running" | "stopped"
+	Order          int       `json:"order,omitempty"`
+	GridOrder      int       `json:"grid_order,omitempty"`
+	Signal         string    `json:"signal,omitempty"` // persisted "requires_action" so it survives restart
 }
 
 // DefaultPath returns the sessions file under ~/.config/orchid (honoring

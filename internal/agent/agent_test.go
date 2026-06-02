@@ -1,6 +1,8 @@
 package agent
 
 import (
+	"os"
+	"path/filepath"
 	"reflect"
 	"testing"
 )
@@ -30,15 +32,35 @@ func TestCodexCommands(t *testing.T) {
 	if !ok {
 		t.Fatal("codex not registered")
 	}
-	if got := a.NewCommand("/tmp", "ignored"); !reflect.DeepEqual(got, []string{"codex"}) {
-		t.Fatalf("NewCommand = %v", got)
+	// NewCommand starts with "codex" and registers the orchid MCP server via -c.
+	got := a.NewCommand("/tmp", "ignored")
+	if got[0] != "codex" {
+		t.Fatalf("NewCommand[0] = %q", got[0])
 	}
-	if got := a.ResumeCommand("/tmp", "ignored"); !reflect.DeepEqual(got, []string{"codex", "resume", "--last"}) {
-		t.Fatalf("ResumeCommand = %v", got)
+	if !containsArg(got, `mcp_servers.orchid.args=["mcp"]`) {
+		t.Fatalf("NewCommand missing orchid MCP flag: %v", got)
+	}
+	// ResumeCommand keeps the `resume --last` subcommand after the -c flags.
+	rs := a.ResumeCommand("/tmp", "ignored")
+	if rs[len(rs)-2] != "resume" || rs[len(rs)-1] != "--last" {
+		t.Fatalf("ResumeCommand tail = %v", rs)
+	}
+	if !containsArg(rs, `mcp_servers.orchid.args=["mcp"]`) {
+		t.Fatalf("ResumeCommand missing orchid MCP flag: %v", rs)
 	}
 }
 
+func containsArg(argv []string, want string) bool {
+	for _, a := range argv {
+		if a == want {
+			return true
+		}
+	}
+	return false
+}
+
 func TestShellCommands(t *testing.T) {
+	t.Setenv("XDG_CONFIG_HOME", t.TempDir()) // no config file -> fall back to $SHELL
 	t.Setenv("SHELL", "/bin/zsh")
 	a, ok := Get("shell")
 	if !ok {
@@ -49,6 +71,47 @@ func TestShellCommands(t *testing.T) {
 	}
 	if got := a.ResumeCommand("/tmp", ""); got != nil {
 		t.Fatalf("ResumeCommand = %v, want nil", got)
+	}
+}
+
+func TestShellConfigOverride(t *testing.T) {
+	dir := t.TempDir()
+	t.Setenv("XDG_CONFIG_HOME", dir)
+	t.Setenv("SHELL", "/bin/zsh")
+	od := filepath.Join(dir, "orchid")
+	if err := os.MkdirAll(od, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(od, "config.json"), []byte(`{"shell":"/opt/homebrew/bin/fish"}`), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if got := ShellPath(); got != "/opt/homebrew/bin/fish" {
+		t.Fatalf("ShellPath = %q, want configured fish (config beats $SHELL)", got)
+	}
+}
+
+func TestClaudeTitle(t *testing.T) {
+	home := t.TempDir()
+	t.Setenv("HOME", home)
+	dir := filepath.Join(home, ".claude", "projects", "proj")
+	if err := os.MkdirAll(dir, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	body := `{"type":"user","message":{}}` + "\n" +
+		`{"type":"ai-title","aiTitle":"First Title","sessionId":"u1"}` + "\n" +
+		`{"type":"assistant","message":{}}` + "\n" +
+		`{"type":"ai-title","aiTitle":"Latest Title","sessionId":"u1"}` + "\n"
+	if err := os.WriteFile(filepath.Join(dir, "u1.jsonl"), []byte(body), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if got := ClaudeTitle("u1"); got != "Latest Title" {
+		t.Fatalf("ClaudeTitle = %q, want Latest Title", got)
+	}
+	if got := ClaudeTitle("missing"); got != "" {
+		t.Fatalf("missing transcript should be empty, got %q", got)
+	}
+	if got := ClaudeTitle(""); got != "" {
+		t.Fatalf("empty id should be empty, got %q", got)
 	}
 }
 

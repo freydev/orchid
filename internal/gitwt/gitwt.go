@@ -67,15 +67,72 @@ func parseList(out []byte) []Worktree {
 
 func sani(branch string) string { return strings.ReplaceAll(branch, "/", "-") }
 
-// Add creates a new worktree on a NEW branch (off current HEAD) under
-// <repo>/.orchid/worktrees/<sani(branch)>. Returns the worktree's absolute path
-// with symlinks resolved (matching the output of git worktree list).
+// DefaultBranch returns the repo's default branch name (e.g. "main" or
+// "master"). It prefers the remote's HEAD, then a local main/master, and
+// finally the currently checked-out branch.
+func DefaultBranch(repo string) string {
+	if out, err := exec.Command("git", "-C", repo, "symbolic-ref", "--short", "refs/remotes/origin/HEAD").Output(); err == nil {
+		ref := strings.TrimSpace(string(out)) // e.g. "origin/main"
+		if i := strings.IndexByte(ref, '/'); i >= 0 {
+			return ref[i+1:]
+		}
+	}
+	for _, b := range []string{"main", "master"} {
+		if exec.Command("git", "-C", repo, "rev-parse", "--verify", "--quiet", "refs/heads/"+b).Run() == nil {
+			return b
+		}
+	}
+	if out, err := exec.Command("git", "-C", repo, "symbolic-ref", "--short", "HEAD").Output(); err == nil {
+		if s := strings.TrimSpace(string(out)); s != "" {
+			return s
+		}
+	}
+	return "HEAD"
+}
+
+// IsRepo reports whether path is usable as a git repository.
+func IsRepo(repo string) bool {
+	return exec.Command("git", "-C", repo, "rev-parse", "--git-dir").Run() == nil
+}
+
+// HasOrigin reports whether the repo has a remote named "origin".
+func HasOrigin(repo string) bool {
+	out, err := exec.Command("git", "-C", repo, "remote").Output()
+	if err != nil {
+		return false
+	}
+	for _, r := range strings.Fields(string(out)) {
+		if r == "origin" {
+			return true
+		}
+	}
+	return false
+}
+
+// freshBase resolves the start-point for new worktrees: always the default
+// branch, fetched fresh from origin when a remote is configured. If the fetch
+// fails (e.g. offline) it falls back to the local default branch.
+func freshBase(repo string) string {
+	def := DefaultBranch(repo)
+	if HasOrigin(repo) {
+		if err := exec.Command("git", "-C", repo, "fetch", "origin", def).Run(); err == nil {
+			return "origin/" + def
+		}
+	}
+	return def
+}
+
+// Add creates a new worktree on a NEW branch (off the fresh default branch —
+// origin/<default> when a remote exists, otherwise the local default branch)
+// under <repo>/.orchid/worktrees/<sani(branch)>. Returns the worktree's
+// absolute path with symlinks resolved (matching git worktree list output).
 func Add(repo, branch string) (string, error) {
 	if strings.TrimSpace(branch) == "" {
 		return "", fmt.Errorf("branch is required")
 	}
+	base := freshBase(repo)
 	path := filepath.Join(repo, ".orchid", "worktrees", sani(branch))
-	out, err := exec.Command("git", "-C", repo, "worktree", "add", path, "-b", branch).CombinedOutput()
+	out, err := exec.Command("git", "-C", repo, "worktree", "add", path, "-b", branch, base).CombinedOutput()
 	if err != nil {
 		return "", fmt.Errorf("git worktree add: %w: %s", err, out)
 	}

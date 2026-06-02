@@ -2,6 +2,7 @@ package session
 
 import (
 	"sync"
+	"time"
 
 	"orchid/internal/agent"
 	"orchid/internal/store"
@@ -30,10 +31,11 @@ type Session struct {
 	ring   *ringBuffer
 	onExit func()
 
-	mu       sync.Mutex
-	alive    bool
-	sub      *attachment
-	doneOnce sync.Once
+	mu         sync.Mutex
+	alive      bool
+	lastOutput time.Time
+	sub        *attachment
+	doneOnce   sync.Once
 }
 
 // historyLines is how much scrollback to seed from tmux on (re)attach.
@@ -41,9 +43,9 @@ const historyLines = 2000
 
 // createSession creates a NEW detached tmux session running the agent's fresh
 // command, then attaches a control-mode client.
-func createSession(rec store.Record, ag agent.Agent, onExit func()) (*Session, error) {
+func createSession(rec store.Record, ag agent.Agent, env []string, onExit func()) (*Session, error) {
 	argv := ag.NewCommand(rec.Cwd, rec.AgentSessionID)
-	if err := tmux.NewSession(rec.Tmux, rec.Cwd, argv); err != nil {
+	if err := tmux.NewSession(rec.Tmux, rec.Cwd, env, argv); err != nil {
 		return nil, err
 	}
 	return attachSession(rec, onExit)
@@ -72,6 +74,7 @@ func attachSession(rec store.Record, onExit func()) (*Session, error) {
 		ring:           ring,
 		onExit:         onExit,
 		alive:          true,
+		lastOutput:     time.Now(),
 	}, nil
 }
 
@@ -83,6 +86,9 @@ func (s *Session) Start() {
 
 func (s *Session) readLoop() {
 	for data := range s.ctl.Output() {
+		s.mu.Lock()
+		s.lastOutput = time.Now()
+		s.mu.Unlock()
 		s.broadcast(data)
 	}
 	s.mu.Lock()
@@ -128,6 +134,13 @@ func (s *Session) Alive() bool {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	return s.alive
+}
+
+// Active reports whether pane output was produced within the given window.
+func (s *Session) Active(within time.Duration) bool {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	return time.Since(s.lastOutput) < within
 }
 
 // Close terminates the control client. The tmux session survives.

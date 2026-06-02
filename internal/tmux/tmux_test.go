@@ -22,7 +22,7 @@ func TestSessionRoundtrip(t *testing.T) {
 	if HasSession(name) {
 		t.Fatal("session should not exist yet")
 	}
-	if err := NewSession(name, "/tmp", []string{"sleep", "60"}); err != nil {
+	if err := NewSession(name, "/tmp", nil, []string{"sleep", "60"}); err != nil {
 		t.Fatalf("NewSession: %v", err)
 	}
 	if !HasSession(name) {
@@ -41,7 +41,7 @@ func TestNewSessionSetsWindowSizeLatest(t *testing.T) {
 	name := "orchid-test-winsize"
 	_ = KillSession(name)
 	defer KillSession(name)
-	if err := NewSession(name, "/tmp", []string{"sleep", "60"}); err != nil {
+	if err := NewSession(name, "/tmp", nil, []string{"sleep", "60"}); err != nil {
 		t.Fatalf("NewSession: %v", err)
 	}
 	out, err := exec.Command("tmux", "show-options", "-t", name, "window-size").CombinedOutput()
@@ -50,5 +50,24 @@ func TestNewSessionSetsWindowSizeLatest(t *testing.T) {
 	}
 	if !strings.Contains(string(out), "latest") {
 		t.Fatalf("want window-size latest, got %q", out)
+	}
+}
+
+func TestNewSessionInjectsEnv(t *testing.T) {
+	if err := Available(); err != nil {
+		t.Skipf("tmux not available: %v", err)
+	}
+	name := "orchid-test-env"
+	_ = KillSession(name)
+	if err := NewSession(name, "/tmp", []string{"ORCHID_SESSION=abc123", "ORCHID_URL=http://x"}, []string{"sh"}); err != nil {
+		t.Fatalf("NewSession: %v", err)
+	}
+	defer KillSession(name)
+	out, err := exec.Command("tmux", "show-environment", "-t", name, "ORCHID_SESSION").CombinedOutput()
+	if err != nil {
+		t.Fatalf("show-environment: %v: %s", err, out)
+	}
+	if string(out) != "ORCHID_SESSION=abc123\n" {
+		t.Fatalf("env = %q, want ORCHID_SESSION=abc123", string(out))
 	}
 }

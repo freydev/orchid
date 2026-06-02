@@ -10,7 +10,7 @@ func TestControlAttachStreamSendKeys(t *testing.T) {
 	skipIfNoTmux(t)
 	name := "orchid-test-ctl"
 	_ = KillSession(name)
-	if err := NewSession(name, "/tmp", []string{"bash", "--norc"}); err != nil {
+	if err := NewSession(name, "/tmp", nil, []string{"bash", "--norc"}); err != nil {
 		t.Fatalf("NewSession: %v", err)
 	}
 	defer KillSession(name)
@@ -51,7 +51,7 @@ func TestControlCaptureReturnsHistory(t *testing.T) {
 	skipIfNoTmux(t)
 	name := "orchid-test-cap"
 	_ = KillSession(name)
-	if err := NewSession(name, "/tmp", []string{"bash", "--norc"}); err != nil {
+	if err := NewSession(name, "/tmp", nil, []string{"bash", "--norc"}); err != nil {
 		t.Fatalf("NewSession: %v", err)
 	}
 	defer KillSession(name)

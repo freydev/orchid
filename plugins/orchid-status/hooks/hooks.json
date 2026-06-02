@@ -1,0 +1,32 @@
+{
+  "hooks": {
+    "SessionStart": [
+      { "matcher": "", "hooks": [
+        { "type": "command", "command": "${CLAUDE_PLUGIN_ROOT}/bin/signal.sh idle", "async": true, "timeout": 5 }
+      ]}
+    ],
+    "UserPromptSubmit": [
+      { "matcher": "", "hooks": [
+        { "type": "command", "command": "${CLAUDE_PLUGIN_ROOT}/bin/signal.sh running", "async": true, "timeout": 5 }
+      ]}
+    ],
+    "PreToolUse": [
+      { "matcher": "", "hooks": [
+        { "type": "command", "command": "${CLAUDE_PLUGIN_ROOT}/bin/signal.sh running", "async": true, "timeout": 5 }
+      ]}
+    ],
+    "Stop": [
+      { "matcher": "", "hooks": [
+        { "type": "command", "command": "${CLAUDE_PLUGIN_ROOT}/bin/signal.sh done", "async": true, "timeout": 5 }
+      ]}
+    ],
+    "Notification": [
+      { "matcher": "idle_prompt", "hooks": [
+        { "type": "command", "command": "${CLAUDE_PLUGIN_ROOT}/bin/signal.sh idle", "async": true, "timeout": 5 }
+      ]},
+      { "matcher": "^(?!idle_prompt$).*", "hooks": [
+        { "type": "command", "command": "${CLAUDE_PLUGIN_ROOT}/bin/signal.sh requires_action", "async": true, "timeout": 5 }
+      ]}
+    ]
+  }
+}

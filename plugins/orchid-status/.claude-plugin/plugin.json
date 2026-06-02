@@ -1,0 +1,5 @@
+{
+  "name": "orchid-status",
+  "description": "Reports claude session status (running / requires_action / idle) to the orchid dashboard via hooks and an MCP set_status tool.",
+  "version": "1.0.0"
+}

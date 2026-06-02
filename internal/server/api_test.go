@@ -7,6 +7,7 @@ import (
 	"net/http/httptest"
 	"os/exec"
 	"path/filepath"
+	"strings"
 	"testing"
 
 	"orchid/internal/project"
@@ -83,7 +84,7 @@ func TestAPIWorktreesAndCascade(t *testing.T) {
 	resp.Body.Close()
 	wtPath := wt["path"].(string)
 
-	s, err := mgr.Create(p.ID, wtPath, "shell")
+	s, err := mgr.Create(p.ID, wtPath, "shell", "")
 	if err != nil {
 		t.Fatalf("create session: %v", err)
 	}
@@ -121,4 +122,62 @@ func TestAPICreateSessionValidation(t *testing.T) {
 		t.Fatalf("bad worktree = %d", resp.StatusCode)
 	}
 	resp.Body.Close()
+}
+
+// newServerWithSession mirrors newTestServer, but also registers a project
+// pointing at a fresh git repo and creates a live "shell" session in its main
+// worktree, returning everything a status test needs.
+func newServerWithSession(t *testing.T) (*session.Manager, *httptest.Server, *session.Session) {
+	t.Helper()
+	ts, mgr, ps := newTestServer(t)
+	repo := gitRepo(t)
+	p, err := ps.Add("p", repo)
+	if err != nil {
+		t.Fatalf("add project: %v", err)
+	}
+	s, err := mgr.Create(p.ID, repo, "shell", "")
+	if err != nil {
+		t.Fatalf("create session: %v", err)
+	}
+	return mgr, ts, s
+}
+
+func TestStatus(t *testing.T) {
+	mgr, ts, s := newServerWithSession(t)
+	defer ts.Close()
+
+	post := func(path, body string) int {
+		resp, err := http.Post(ts.URL+path, "application/json", strings.NewReader(body))
+		if err != nil {
+			t.Fatalf("POST %s: %v", path, err)
+		}
+		resp.Body.Close()
+		return resp.StatusCode
+	}
+
+	if code := post("/api/sessions/"+s.ID+"/status", `{"state":"requires_action"}`); code != http.StatusNoContent {
+		t.Fatalf("status code = %d", code)
+	}
+	if st := statusOf(mgr, s.ID); st != "requires_action" {
+		t.Fatalf("after status signal: %q", st)
+	}
+	// a running signal (user replied) clears it
+	if code := post("/api/sessions/"+s.ID+"/status", `{"state":"running"}`); code != http.StatusNoContent {
+		t.Fatalf("status code = %d", code)
+	}
+	if st := statusOf(mgr, s.ID); st != "running" {
+		t.Fatalf("running should clear requires_action: %q", st)
+	}
+	if code := post("/api/sessions/nope/status", `{"state":"running"}`); code != http.StatusNotFound {
+		t.Fatalf("unknown id code = %d", code)
+	}
+}
+
+func statusOf(mgr *session.Manager, id string) string {
+	for _, info := range mgr.List() {
+		if info.ID == id {
+			return info.Status
+		}
+	}
+	return ""
 }

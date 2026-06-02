@@ -73,3 +73,33 @@ func TestLoadPersists(t *testing.T) {
 		t.Fatalf("reloaded = %v", s2.List())
 	}
 }
+
+func TestReorder(t *testing.T) {
+	s := New(filepath.Join(t.TempDir(), "projects.json"))
+	s.projects = []Project{{ID: "a"}, {ID: "b"}, {ID: "c"}}
+	if err := s.Reorder([]string{"c", "a"}); err != nil {
+		t.Fatal(err)
+	}
+	got := []string{s.projects[0].ID, s.projects[1].ID, s.projects[2].ID}
+	want := []string{"c", "a", "b"} // listed first in given order, unknown ("b") after
+	for i := range want {
+		if got[i] != want[i] {
+			t.Fatalf("order = %v, want %v", got, want)
+		}
+	}
+}
+
+func TestSetWorktreeOrder(t *testing.T) {
+	s := New(filepath.Join(t.TempDir(), "projects.json"))
+	s.projects = []Project{{ID: "a"}}
+	if err := s.SetWorktreeOrder("a", []string{"/x", "/y"}); err != nil {
+		t.Fatal(err)
+	}
+	wt := s.projects[0].WorktreeOrder
+	if len(wt) != 2 || wt[0] != "/x" || wt[1] != "/y" {
+		t.Fatalf("worktree order = %v", wt)
+	}
+	if err := s.SetWorktreeOrder("nope", []string{"/z"}); err == nil {
+		t.Fatal("expected error for unknown project")
+	}
+}

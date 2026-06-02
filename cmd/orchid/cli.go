@@ -20,10 +20,12 @@ import (
 
 	"orchid/internal/client"
 	"orchid/internal/gitwt"
+	"orchid/internal/mcp"
 	"orchid/internal/project"
 	"orchid/internal/runtime"
 	"orchid/internal/server"
 	"orchid/internal/session"
+	"orchid/internal/statusclient"
 	"orchid/internal/store"
 	"orchid/internal/tmux"
 )
@@ -54,6 +56,10 @@ func route(args []string) (func() int, error) {
 		return func() int { return rmCmd(rest) }, nil
 	case "restart":
 		return func() int { return restartCmd(rest) }, nil
+	case "signal":
+		return func() int { return signalCmd(rest) }, nil
+	case "mcp":
+		return func() int { return mcpCmd(rest) }, nil
 	default:
 		return nil, fmt.Errorf("unknown command %q", args[0])
 	}
@@ -83,6 +89,35 @@ func hostPort(args []string) (string, int, error) {
 	return *host, *port, nil
 }
 
+// signalCmd posts an agent status signal for the current session. Invoked by the
+// claude plugin hooks: `orchid signal running|done|requires_action`. Reads
+// ORCHID_SESSION and ORCHID_URL from the environment (injected into the tmux
+// session). Always exits 0 so a status hiccup never disrupts the agent.
+func signalCmd(args []string) int {
+	if len(args) < 1 {
+		return 0
+	}
+	state := args[0]
+	switch state {
+	case "running", "done", "requires_action", "idle":
+	default:
+		return 0
+	}
+	id := os.Getenv("ORCHID_SESSION")
+	url := os.Getenv("ORCHID_URL")
+	_ = statusclient.Post(url, id, state)
+	return 0
+}
+
+// mcpCmd runs the stdio MCP server used by the claude plugin's .mcp.json.
+func mcpCmd(args []string) int {
+	if err := mcp.Serve(os.Stdin, os.Stdout); err != nil {
+		fmt.Fprintln(os.Stderr, "orchid mcp:", err)
+		return 1
+	}
+	return 0
+}
+
 // serveCmd runs the server in the foreground with graceful shutdown.
 func serveCmd(args []string) int {
 	host, port, err := hostPort(args)
@@ -99,9 +134,22 @@ func serveCmd(args []string) int {
 	}
 	addr := net.JoinHostPort(host, strconv.Itoa(port))
 	mgr := session.NewManager(sessionsPath())
+	if self, err := os.Executable(); err == nil {
+		mgr.SetEnv("http://"+addr, self)
+		if os.Getenv("ORCHID_PLUGIN_DIR") == "" {
+			cand := filepath.Join(filepath.Dir(self), "plugins", "orchid-status")
+			if st, err := os.Stat(cand); err == nil && st.IsDir() {
+				_ = os.Setenv("ORCHID_PLUGIN_DIR", cand)
+			}
+		}
+	}
 	if err := mgr.Restore(); err != nil {
 		log.Printf("orchid: restore sessions: %v", err)
 	}
+	if n := mgr.PruneOrphanTmux(); n > 0 {
+		log.Printf("orchid: pruned %d orphan tmux session(s) not in sessions.json", n)
+	}
+	mgr.SyncTitles() // backfill claude session titles at startup
 	ps := project.New(projectsPath())
 	if err := ps.Load(); err != nil {
 		log.Printf("orchid: restore projects: %v", err)

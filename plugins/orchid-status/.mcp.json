@@ -1,0 +1,13 @@
+{
+  "mcpServers": {
+    "orchid": {
+      "type": "stdio",
+      "command": "${ORCHID_BIN}",
+      "args": ["mcp"],
+      "env": {
+        "ORCHID_SESSION": "${ORCHID_SESSION}",
+        "ORCHID_URL": "${ORCHID_URL}"
+      }
+    }
+  }
+}

@@ -8,6 +8,7 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"sort"
 	"sync"
 )
 
@@ -16,6 +17,9 @@ type Project struct {
 	ID   string `json:"id"`
 	Name string `json:"name"`
 	Path string `json:"path"`
+	// WorktreeOrder is the user's preferred display order of worktree paths.
+	// Worktrees absent from this list sort after, in git order.
+	WorktreeOrder []string `json:"worktree_order,omitempty"`
 }
 
 // Store is the persisted set of projects.
@@ -93,6 +97,39 @@ func (s *Store) Add(name, path string) (Project, error) {
 	p := Project{ID: newID(), Name: name, Path: abs}
 	s.projects = append(s.projects, p)
 	return p, s.saveLocked()
+}
+
+// Reorder sets the project display order to match ids. Projects whose id is not
+// in ids keep their relative order and sort after the listed ones.
+func (s *Store) Reorder(ids []string) error {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	pos := make(map[string]int, len(ids))
+	for i, id := range ids {
+		pos[id] = i
+	}
+	sort.SliceStable(s.projects, func(i, j int) bool {
+		pi, oki := pos[s.projects[i].ID]
+		pj, okj := pos[s.projects[j].ID]
+		if oki && okj {
+			return pi < pj
+		}
+		return oki && !okj // known (listed) before unknown
+	})
+	return s.saveLocked()
+}
+
+// SetWorktreeOrder records the user's worktree display order (by path) for a project.
+func (s *Store) SetWorktreeOrder(id string, paths []string) error {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	for i := range s.projects {
+		if s.projects[i].ID == id {
+			s.projects[i].WorktreeOrder = paths
+			return s.saveLocked()
+		}
+	}
+	return fmt.Errorf("project %q not found", id)
 }
 
 func (s *Store) Remove(id string) error {
