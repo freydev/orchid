@@ -12,12 +12,27 @@ type Server struct {
 	mgr      *session.Manager
 	projects *project.Store
 	mux      *http.ServeMux
+	// runtime info for the settings page / self-restart
+	selfPath string
+	host     string
+	port     int
 }
 
-func New(mgr *session.Manager, projects *project.Store) http.Handler {
+func New(mgr *session.Manager, projects *project.Store) *Server {
 	s := &Server{mgr: mgr, projects: projects, mux: http.NewServeMux()}
 	s.routes()
-	return s.mux
+	return s
+}
+
+// ServeHTTP makes Server an http.Handler delegating to its mux.
+func (s *Server) ServeHTTP(w http.ResponseWriter, r *http.Request) { s.mux.ServeHTTP(w, r) }
+
+// SetRuntime records how the daemon was launched so the settings page can show
+// the bind address and the restart endpoint can relaunch with a new port.
+func (s *Server) SetRuntime(selfPath, host string, port int) {
+	s.selfPath = selfPath
+	s.host = host
+	s.port = port
 }
 
 func (s *Server) routes() {
@@ -30,9 +45,16 @@ func (s *Server) routes() {
 	s.mux.HandleFunc("POST /api/sessions/{id}/restart", s.handleRestart)
 	s.mux.HandleFunc("POST /api/sessions/{id}/stop", s.handleStop)
 	s.mux.HandleFunc("POST /api/sessions/{id}/status", s.handleStatus)
+	s.mux.HandleFunc("POST /api/sessions/{id}/notify", s.handleNotify)
+
+	s.mux.HandleFunc("GET /api/settings", s.handleGetSettings)
+	s.mux.HandleFunc("PUT /api/settings", s.handlePutSettings)
+	s.mux.HandleFunc("PUT /api/settings/rail-width", s.handleRailWidth)
+	s.mux.HandleFunc("POST /api/restart", s.handleRestartDaemon)
 
 	s.mux.HandleFunc("GET /api/projects", s.handleProjects)
 	s.mux.HandleFunc("POST /api/projects", s.handleAddProject)
+	s.mux.HandleFunc("PATCH /api/projects/{id}", s.handleUpdateProject)
 	s.mux.HandleFunc("PUT /api/projects/order", s.handleProjectsOrder)
 	s.mux.HandleFunc("PUT /api/sessions/order", s.handleSessionsOrder)
 	s.mux.HandleFunc("PUT /api/sessions/grid-order", s.handleSessionsGridOrder)

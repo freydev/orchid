@@ -4,7 +4,6 @@ import (
 	"sync"
 	"time"
 
-	"orchid/internal/agent"
 	"orchid/internal/store"
 	"orchid/internal/tmux"
 )
@@ -41,10 +40,9 @@ type Session struct {
 // historyLines is how much scrollback to seed from tmux on (re)attach.
 const historyLines = 2000
 
-// createSession creates a NEW detached tmux session running the agent's fresh
-// command, then attaches a control-mode client.
-func createSession(rec store.Record, ag agent.Agent, env []string, onExit func()) (*Session, error) {
-	argv := ag.NewCommand(rec.Cwd, rec.AgentSessionID)
+// createSession creates a NEW detached tmux session running argv, then attaches
+// a control-mode client.
+func createSession(rec store.Record, argv []string, env []string, onExit func()) (*Session, error) {
 	if err := tmux.NewSession(rec.Tmux, rec.Cwd, env, argv); err != nil {
 		return nil, err
 	}

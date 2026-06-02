@@ -29,6 +29,9 @@ type Info struct {
 	Status    string `json:"status"` // "running" | "requires_action" | "idle" | "stopped"
 	Alive     bool   `json:"alive"`
 	GridOrder int    `json:"grid_order"`
+	Color     string `json:"color,omitempty"`   // accent color id, overrides agent color
+	Shell     string `json:"shell,omitempty"`   // shell choice for "shell" sessions
+	Command   string `json:"command,omitempty"` // preset command running in this shell session
 }
 
 // Manager owns sessions (running, with a live PTY) and records (all, incl. stopped).
@@ -41,6 +44,9 @@ type Manager struct {
 	binPath  string
 	path     string
 	closing  bool
+	// shellFor resolves the launchable shell path for a "shell" session given its
+	// project and the session's own shell choice. Set via SetShellResolver.
+	shellFor func(projectID, sessionShell string) string
 }
 
 // signalState is the latest agent-reported activity for a live session.
@@ -65,6 +71,49 @@ func (m *Manager) SetEnv(selfURL, binPath string) {
 	defer m.mu.Unlock()
 	m.selfURL = selfURL
 	m.binPath = binPath
+}
+
+// SetShellResolver installs the function that maps a (project, session-shell
+// choice) pair to a launchable shell path. When unset, "shell" sessions fall
+// back to the global agent.ShellPath().
+func (m *Manager) SetShellResolver(f func(projectID, sessionShell string) string) {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	m.shellFor = f
+}
+
+// shellArgvFor returns the argv to launch for a "shell" session, honoring the
+// resolver (session -> project -> global). A preset command (rec.Command) runs
+// via `shell -c <cmd>`. Caller must not hold m.mu.
+func (m *Manager) shellArgvFor(rec store.Record) []string {
+	m.mu.Lock()
+	f := m.shellFor
+	m.mu.Unlock()
+	shell := agent.ShellPath()
+	if f != nil {
+		if p := f(rec.Project, rec.Shell); p != "" {
+			shell = p
+		}
+	}
+	if cmd := strings.TrimSpace(rec.Command); cmd != "" {
+		return []string{shell, "-c", cmd}
+	}
+	return []string{shell}
+}
+
+// freshArgv builds the launch argv for a record: shell sessions resolve their
+// configured shell; other agents use the agent's own command (resume preferred
+// when resume is true).
+func (m *Manager) freshArgv(ag agent.Agent, rec store.Record, resume bool) []string {
+	if rec.Agent == "shell" {
+		return m.shellArgvFor(rec)
+	}
+	if resume {
+		if argv := ag.ResumeCommand(rec.Cwd, rec.AgentSessionID); argv != nil {
+			return argv
+		}
+	}
+	return ag.NewCommand(rec.Cwd, rec.AgentSessionID)
 }
 
 // sessionEnv returns the tmux env entries for a session id.
@@ -118,7 +167,15 @@ func (m *Manager) onExit(id string) {
 	m.saveLocked()
 }
 
-func (m *Manager) Create(projectID, worktree, agentName, name string) (*Session, error) {
+// CreateOpts carries the optional per-session settings chosen at creation.
+type CreateOpts struct {
+	Name    string
+	Color   string
+	Shell   string // shell choice for "shell" sessions ("" = inherit)
+	Command string // preset command to run via `shell -c` (shell sessions only)
+}
+
+func (m *Manager) Create(projectID, worktree, agentName string, opts CreateOpts) (*Session, error) {
 	ag, ok := agent.Get(agentName)
 	if !ok {
 		return nil, fmt.Errorf("unknown agent %q", agentName)
@@ -126,7 +183,7 @@ func (m *Manager) Create(projectID, worktree, agentName, name string) (*Session,
 	id := newID()
 	rec := store.Record{
 		ID:             id,
-		Name:           strings.TrimSpace(name),
+		Name:           strings.TrimSpace(opts.Name),
 		Agent:          agentName,
 		Cwd:            worktree,
 		Project:        projectID,
@@ -135,8 +192,11 @@ func (m *Manager) Create(projectID, worktree, agentName, name string) (*Session,
 		AgentSessionID: uuid.NewString(),
 		Created:        time.Now().UTC(),
 		Status:         "running",
+		Color:          strings.TrimSpace(opts.Color),
+		Shell:          strings.TrimSpace(opts.Shell),
+		Command:        strings.TrimSpace(opts.Command),
 	}
-	s, err := createSession(rec, ag, m.sessionEnv(id), func() { m.onExit(id) })
+	s, err := createSession(rec, m.freshArgv(ag, rec, false), m.sessionEnv(id), func() { m.onExit(id) })
 	if err != nil {
 		return nil, err
 	}
@@ -206,10 +266,7 @@ func (m *Manager) Restart(id string) (*Session, error) {
 	if !ok {
 		return nil, fmt.Errorf("unknown agent %q", rec.Agent)
 	}
-	argv := ag.ResumeCommand(rec.Cwd, rec.AgentSessionID)
-	if argv == nil {
-		argv = ag.NewCommand(rec.Cwd, rec.AgentSessionID)
-	}
+	argv := m.freshArgv(ag, rec, true)
 	if err := tmux.NewSession(rec.Tmux, rec.Cwd, m.sessionEnv(id), argv); err != nil {
 		if tmux.HasSession(rec.Tmux) {
 			return nil, fmt.Errorf("session %q already running", id)
@@ -348,13 +405,34 @@ func (m *Manager) SyncTitles() {
 
 // Rename sets a session's display name (empty clears it) and persists.
 func (m *Manager) Rename(id, name string) error {
+	return m.Update(id, SessUpdate{Name: &name})
+}
+
+// SessUpdate carries optional session edits. A nil field is left unchanged; a
+// non-nil field is applied verbatim (so a pointer to "" clears it).
+type SessUpdate struct {
+	Name  *string
+	Color *string
+	Shell *string
+}
+
+// Update applies the non-nil fields of u to a session record and persists.
+func (m *Manager) Update(id string, u SessUpdate) error {
 	m.mu.Lock()
 	defer m.mu.Unlock()
 	rec, ok := m.records[id]
 	if !ok {
 		return fmt.Errorf("session %q not found", id)
 	}
-	rec.Name = strings.TrimSpace(name)
+	if u.Name != nil {
+		rec.Name = strings.TrimSpace(*u.Name)
+	}
+	if u.Color != nil {
+		rec.Color = strings.TrimSpace(*u.Color)
+	}
+	if u.Shell != nil {
+		rec.Shell = strings.TrimSpace(*u.Shell)
+	}
 	m.records[id] = rec
 	m.saveLocked()
 	return nil
@@ -445,6 +523,9 @@ func (m *Manager) List() []Info {
 			Status:    status,
 			Alive:     e.s != nil,
 			GridOrder: e.rec.GridOrder,
+			Color:     e.rec.Color,
+			Shell:     e.rec.Shell,
+			Command:   e.rec.Command,
 		})
 	}
 	return out

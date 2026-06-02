@@ -17,7 +17,8 @@
     ],
     "Stop": [
       { "matcher": "", "hooks": [
-        { "type": "command", "command": "${CLAUDE_PLUGIN_ROOT}/bin/signal.sh done", "async": true, "timeout": 5 }
+        { "type": "command", "command": "${CLAUDE_PLUGIN_ROOT}/bin/signal.sh done", "async": true, "timeout": 5 },
+        { "type": "command", "command": "${CLAUDE_PLUGIN_ROOT}/bin/notify.sh", "async": true, "timeout": 5 }
       ]}
     ],
     "Notification": [

@@ -9,6 +9,9 @@ import (
 
 	"orchid/internal/agent"
 	"orchid/internal/gitwt"
+	"orchid/internal/notify"
+	"orchid/internal/project"
+	"orchid/internal/session"
 )
 
 func (s *Server) handleList(w http.ResponseWriter, r *http.Request) {
@@ -20,10 +23,18 @@ type createReq struct {
 	Worktree string `json:"worktree"`
 	Agent    string `json:"agent"`
 	Name     string `json:"name"`
+	Color    string `json:"color"`
+	Shell    string `json:"shell"`
+	Command  string `json:"command"`
 }
 
-type renameReq struct {
-	Name string `json:"name"`
+// sessPatchReq is the PATCH body for a session. Pointer fields distinguish
+// "absent" (leave unchanged) from "" (clear): the quick-rename modal sends only
+// name; the settings modal sends name+color+shell.
+type sessPatchReq struct {
+	Name  *string `json:"name"`
+	Color *string `json:"color"`
+	Shell *string `json:"shell"`
 }
 
 func (s *Server) handleCreate(w http.ResponseWriter, r *http.Request) {
@@ -56,7 +67,9 @@ func (s *Server) handleCreate(w http.ResponseWriter, r *http.Request) {
 		http.Error(w, "worktree not found in project", http.StatusBadRequest)
 		return
 	}
-	sess, err := s.mgr.Create(req.Project, req.Worktree, req.Agent, req.Name)
+	sess, err := s.mgr.Create(req.Project, req.Worktree, req.Agent, session.CreateOpts{
+		Name: req.Name, Color: req.Color, Shell: req.Shell, Command: req.Command,
+	})
 	if err != nil {
 		if strings.Contains(err.Error(), "unknown agent") {
 			http.Error(w, err.Error(), http.StatusBadRequest)
@@ -68,20 +81,21 @@ func (s *Server) handleCreate(w http.ResponseWriter, r *http.Request) {
 	writeJSON(w, http.StatusOK, map[string]any{
 		"id": sess.ID, "name": strings.TrimSpace(req.Name), "agent": sess.Agent, "project": sess.Project,
 		"worktree": sess.Worktree, "cwd": sess.Cwd, "status": "running", "alive": true,
+		"color": strings.TrimSpace(req.Color), "shell": strings.TrimSpace(req.Shell), "command": strings.TrimSpace(req.Command),
 	})
 }
 
 func (s *Server) handleRename(w http.ResponseWriter, r *http.Request) {
 	id := r.PathValue("id")
-	var req renameReq
+	var req sessPatchReq
 	if r.Body != nil {
 		_ = json.NewDecoder(r.Body).Decode(&req)
 	}
-	if err := s.mgr.Rename(id, req.Name); err != nil {
+	if err := s.mgr.Update(id, session.SessUpdate{Name: req.Name, Color: req.Color, Shell: req.Shell}); err != nil {
 		http.Error(w, err.Error(), http.StatusNotFound)
 		return
 	}
-	writeJSON(w, http.StatusOK, map[string]any{"id": id, "name": strings.TrimSpace(req.Name)})
+	writeJSON(w, http.StatusOK, map[string]any{"id": id})
 }
 
 // handleShell reports the resolved shell launched for "shell" sessions, so the
@@ -127,6 +141,38 @@ func (s *Server) handleStatus(w http.ResponseWriter, r *http.Request) {
 	default:
 		http.Error(w, "unknown state", http.StatusBadRequest)
 	}
+}
+
+// handleNotify shows a desktop notification that this session's agent finished.
+// Fired by the Stop hook and the MCP notify tool.
+func (s *Server) handleNotify(w http.ResponseWriter, r *http.Request) {
+	id := r.PathValue("id")
+	var req struct {
+		Message string `json:"message"`
+	}
+	if r.Body != nil {
+		_ = json.NewDecoder(r.Body).Decode(&req)
+	}
+	name := ""
+	for _, inf := range s.mgr.List() {
+		if inf.ID == id {
+			name = strings.TrimSpace(inf.Name)
+			if name == "" {
+				name = inf.Agent
+			}
+			break
+		}
+	}
+	title := "orchid"
+	if name != "" {
+		title = "orchid · " + name
+	}
+	body := strings.TrimSpace(req.Message)
+	if body == "" {
+		body = "Agent finished working"
+	}
+	notify.Notify(title, body)
+	w.WriteHeader(http.StatusNoContent)
 }
 
 func (s *Server) handleStop(w http.ResponseWriter, r *http.Request) {
@@ -177,11 +223,26 @@ func writeJSON(w http.ResponseWriter, status int, v any) {
 }
 
 type addProjectReq struct {
-	Name string `json:"name"`
-	Path string `json:"path"`
+	Name        string           `json:"name"`
+	Path        string           `json:"path"`
+	Color       string           `json:"color"`
+	Description string           `json:"description"`
+	Shell       string           `json:"shell"`
+	BaseBranch  string           `json:"base_branch"`
+	Commands    []project.Preset `json:"commands"`
+}
+type updateProjectReq struct {
+	Name        string           `json:"name"`
+	Color       string           `json:"color"`
+	Description string           `json:"description"`
+	Shell       string           `json:"shell"`
+	BaseBranch  string           `json:"base_branch"`
+	Commands    []project.Preset `json:"commands"`
 }
 type addWorktreeReq struct {
 	Branch string `json:"branch"`
+	From   string `json:"from"`  // base branch for a new branch; "" -> project base/default
+	Fetch  *bool  `json:"fetch"` // fetch origin/<from> first; nil -> true (default)
 }
 type rmWorktreeReq struct {
 	Path string `json:"path"`
@@ -197,15 +258,23 @@ type sessChip struct {
 	Agent    string `json:"agent"`
 	Name     string `json:"name"`
 	Status   string `json:"status"`
-	Worktree string `json:"worktree"` // branch/display name
+	Worktree string `json:"worktree"`          // branch/display name
+	Color    string `json:"color,omitempty"`   // session accent override
+	Command  string `json:"command,omitempty"` // preset command, if any
 }
 type projOut struct {
-	ID          string     `json:"id"`
-	Name        string     `json:"name"`
-	Path        string     `json:"path"`
-	Worktrees   int        `json:"worktrees"`
-	Sessions    int        `json:"sessions"`
-	SessionList []sessChip `json:"session_list"` // worktree-order then session-order
+	ID          string           `json:"id"`
+	Name        string           `json:"name"`
+	Path        string           `json:"path"`
+	Color       string           `json:"color,omitempty"`
+	Description string           `json:"description,omitempty"`
+	Shell       string           `json:"shell,omitempty"`
+	BaseBranch  string           `json:"base_branch,omitempty"`
+	Commands    []project.Preset `json:"commands,omitempty"`
+	Branch      string           `json:"branch,omitempty"` // current branch of the main worktree
+	Worktrees   int              `json:"worktrees"`
+	Sessions    int              `json:"sessions"`
+	SessionList []sessChip       `json:"session_list"` // worktree-order then session-order
 }
 
 func (s *Server) handleProjects(w http.ResponseWriter, r *http.Request) {
@@ -233,7 +302,7 @@ func (s *Server) handleProjects(w http.ResponseWriter, r *http.Request) {
 				wtPaths = append(wtPaths, wt.Path)
 				n := wt.Branch
 				if wt.IsMain {
-					n = "main"
+					n = "root"
 				}
 				wtName[wt.Path] = n
 			}
@@ -244,17 +313,19 @@ func (s *Server) handleProjects(w http.ResponseWriter, r *http.Request) {
 			inOrder[path] = true
 			for _, inf := range all {
 				if inf.Project == p.ID && inf.Worktree == path {
-					list = append(list, sessChip{Agent: inf.Agent, Name: inf.Name, Status: inf.Status, Worktree: wtName[path]})
+					list = append(list, sessChip{Agent: inf.Agent, Name: inf.Name, Status: inf.Status, Worktree: wtName[path], Color: inf.Color, Command: inf.Command})
 				}
 			}
 		}
 		for _, inf := range all { // sessions in worktrees git no longer lists
 			if inf.Project == p.ID && !inOrder[inf.Worktree] {
-				list = append(list, sessChip{Agent: inf.Agent, Name: inf.Name, Status: inf.Status, Worktree: inf.Worktree})
+				list = append(list, sessChip{Agent: inf.Agent, Name: inf.Name, Status: inf.Status, Worktree: inf.Worktree, Color: inf.Color, Command: inf.Command})
 			}
 		}
 		out = append(out, projOut{
 			ID: p.ID, Name: p.Name, Path: p.Path,
+			Color: p.Color, Description: p.Description, Shell: p.Shell, BaseBranch: p.BaseBranch, Commands: p.Commands,
+			Branch:    gitwt.CurrentBranch(p.Path),
 			Worktrees: len(wtPaths), Sessions: len(list), SessionList: list,
 		})
 	}
@@ -312,6 +383,26 @@ func (s *Server) handleAddProject(w http.ResponseWriter, r *http.Request) {
 		http.Error(w, err.Error(), http.StatusBadRequest)
 		return
 	}
+	// apply optional settings chosen at creation
+	if req.Color != "" || req.Description != "" || req.Shell != "" || req.BaseBranch != "" || len(req.Commands) > 0 {
+		if err := s.projects.Update(p.ID, p.Name, req.Color, req.Description, req.Shell, req.BaseBranch, req.Commands); err == nil {
+			p, _ = s.projects.Get(p.ID)
+		}
+	}
+	writeJSON(w, http.StatusOK, p)
+}
+
+func (s *Server) handleUpdateProject(w http.ResponseWriter, r *http.Request) {
+	id := r.PathValue("id")
+	var req updateProjectReq
+	if r.Body != nil {
+		_ = json.NewDecoder(r.Body).Decode(&req)
+	}
+	if err := s.projects.Update(id, req.Name, req.Color, req.Description, req.Shell, req.BaseBranch, req.Commands); err != nil {
+		http.Error(w, err.Error(), http.StatusNotFound)
+		return
+	}
+	p, _ := s.projects.Get(id)
 	writeJSON(w, http.StatusOK, p)
 }
 
@@ -353,7 +444,7 @@ func (s *Server) handleWorktrees(w http.ResponseWriter, r *http.Request) {
 	for _, wt := range wts {
 		name := wt.Branch
 		if wt.IsMain {
-			name = "main"
+			name = "root"
 		}
 		out = append(out, wtInfo{Path: wt.Path, Branch: wt.Branch, Name: name, IsMain: wt.IsMain})
 	}
@@ -361,10 +452,11 @@ func (s *Server) handleWorktrees(w http.ResponseWriter, r *http.Request) {
 }
 
 type gitInfo struct {
-	IsRepo        bool   `json:"is_repo"`
-	HasOrigin     bool   `json:"has_origin"`
-	DefaultBranch string `json:"default_branch"`
-	Base          string `json:"base"`
+	IsRepo        bool     `json:"is_repo"`
+	HasOrigin     bool     `json:"has_origin"`
+	DefaultBranch string   `json:"default_branch"`
+	Base          string   `json:"base"`
+	Branches      []string `json:"branches"` // local branches, for the "from" picker
 }
 
 func (s *Server) handleGitInfo(w http.ResponseWriter, r *http.Request) {
@@ -379,11 +471,10 @@ func (s *Server) handleGitInfo(w http.ResponseWriter, r *http.Request) {
 	}
 	def := gitwt.DefaultBranch(proj.Path)
 	hasOrigin := gitwt.HasOrigin(proj.Path)
-	base := def
-	if hasOrigin {
-		base = "origin/" + def
-	}
-	writeJSON(w, http.StatusOK, gitInfo{IsRepo: true, HasOrigin: hasOrigin, DefaultBranch: def, Base: base})
+	// base reflects the project's configured base branch (falling back to the
+	// repo default), so the worktree modal shows the real start point.
+	base := gitwt.BaseRef(proj.Path, proj.BaseBranch)
+	writeJSON(w, http.StatusOK, gitInfo{IsRepo: true, HasOrigin: hasOrigin, DefaultBranch: def, Base: base, Branches: gitwt.Branches(proj.Path)})
 }
 
 func (s *Server) handleAddWorktree(w http.ResponseWriter, r *http.Request) {
@@ -402,7 +493,16 @@ func (s *Server) handleAddWorktree(w http.ResponseWriter, r *http.Request) {
 		http.Error(w, "project is not a git repository", http.StatusBadRequest)
 		return
 	}
-	path, err := gitwt.Add(proj.Path, req.Branch)
+	// base: per-creation "from" override, else the project's configured base
+	base := strings.TrimSpace(req.From)
+	if base == "" {
+		base = proj.BaseBranch
+	}
+	fetch := true // default on
+	if req.Fetch != nil {
+		fetch = *req.Fetch
+	}
+	path, err := gitwt.Add(proj.Path, req.Branch, base, fetch)
 	if err != nil {
 		http.Error(w, err.Error(), http.StatusConflict)
 		return

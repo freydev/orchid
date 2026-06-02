@@ -84,7 +84,7 @@ func TestAPIWorktreesAndCascade(t *testing.T) {
 	resp.Body.Close()
 	wtPath := wt["path"].(string)
 
-	s, err := mgr.Create(p.ID, wtPath, "shell", "")
+	s, err := mgr.Create(p.ID, wtPath, "shell", session.CreateOpts{})
 	if err != nil {
 		t.Fatalf("create session: %v", err)
 	}
@@ -135,7 +135,7 @@ func newServerWithSession(t *testing.T) (*session.Manager, *httptest.Server, *se
 	if err != nil {
 		t.Fatalf("add project: %v", err)
 	}
-	s, err := mgr.Create(p.ID, repo, "shell", "")
+	s, err := mgr.Create(p.ID, repo, "shell", session.CreateOpts{})
 	if err != nil {
 		t.Fatalf("create session: %v", err)
 	}

@@ -18,7 +18,9 @@ import (
 	"text/tabwriter"
 	"time"
 
+	"orchid/internal/agent"
 	"orchid/internal/client"
+	"orchid/internal/config"
 	"orchid/internal/gitwt"
 	"orchid/internal/mcp"
 	"orchid/internal/project"
@@ -58,6 +60,8 @@ func route(args []string) (func() int, error) {
 		return func() int { return restartCmd(rest) }, nil
 	case "signal":
 		return func() int { return signalCmd(rest) }, nil
+	case "notify":
+		return func() int { return notifyCmd(rest) }, nil
 	case "mcp":
 		return func() int { return mcpCmd(rest) }, nil
 	default:
@@ -86,6 +90,17 @@ func hostPort(args []string) (string, int, error) {
 	if err := fs.Parse(args); err != nil {
 		return "", 0, err
 	}
+	// Saved settings (config.json) fill in any value not explicitly passed as a
+	// flag, so `orchid start` honors the port/host chosen in the settings UI.
+	set := map[string]bool{}
+	fs.Visit(func(f *flag.Flag) { set[f.Name] = true })
+	cfg := config.Load()
+	if !set["host"] && cfg.Host != "" {
+		*host = cfg.Host
+	}
+	if !set["port"] && cfg.Port != 0 {
+		*port = cfg.Port
+	}
 	return *host, *port, nil
 }
 
@@ -106,6 +121,18 @@ func signalCmd(args []string) int {
 	id := os.Getenv("ORCHID_SESSION")
 	url := os.Getenv("ORCHID_URL")
 	_ = statusclient.Post(url, id, state)
+	return 0
+}
+
+// notifyCmd asks orchid to show a desktop notification that this session's agent
+// finished. Invoked by the claude plugin's Stop hook: `orchid notify [message]`.
+// Reads ORCHID_SESSION and ORCHID_URL from the environment. Always exits 0.
+func notifyCmd(args []string) int {
+	msg := ""
+	if len(args) > 0 {
+		msg = strings.Join(args, " ")
+	}
+	_ = statusclient.Notify(os.Getenv("ORCHID_URL"), os.Getenv("ORCHID_SESSION"), msg)
 	return 0
 }
 
@@ -133,8 +160,9 @@ func serveCmd(args []string) int {
 		return 1
 	}
 	addr := net.JoinHostPort(host, strconv.Itoa(port))
+	self, _ := os.Executable()
 	mgr := session.NewManager(sessionsPath())
-	if self, err := os.Executable(); err == nil {
+	if self != "" {
 		mgr.SetEnv("http://"+addr, self)
 		if os.Getenv("ORCHID_PLUGIN_DIR") == "" {
 			cand := filepath.Join(filepath.Dir(self), "plugins", "orchid-status")
@@ -143,6 +171,21 @@ func serveCmd(args []string) int {
 			}
 		}
 	}
+	ps := project.New(projectsPath())
+	if err := ps.Load(); err != nil {
+		log.Printf("orchid: restore projects: %v", err)
+	}
+	// Resolve a "shell" session's program: session choice -> project shell ->
+	// global default, then to an absolute path.
+	mgr.SetShellResolver(func(projectID, sessionShell string) string {
+		choice := strings.TrimSpace(sessionShell)
+		if choice == "" {
+			if p, ok := ps.Get(projectID); ok {
+				choice = strings.TrimSpace(p.Shell)
+			}
+		}
+		return agent.ResolveShellName(choice)
+	})
 	if err := mgr.Restore(); err != nil {
 		log.Printf("orchid: restore sessions: %v", err)
 	}
@@ -150,11 +193,9 @@ func serveCmd(args []string) int {
 		log.Printf("orchid: pruned %d orphan tmux session(s) not in sessions.json", n)
 	}
 	mgr.SyncTitles() // backfill claude session titles at startup
-	ps := project.New(projectsPath())
-	if err := ps.Load(); err != nil {
-		log.Printf("orchid: restore projects: %v", err)
-	}
-	srv := &http.Server{Addr: addr, Handler: server.New(mgr, ps)}
+	handler := server.New(mgr, ps)
+	handler.SetRuntime(self, host, port)
+	srv := &http.Server{Addr: addr, Handler: handler}
 
 	ctx, stop := signal.NotifyContext(context.Background(), syscall.SIGTERM, syscall.SIGINT)
 	defer stop()

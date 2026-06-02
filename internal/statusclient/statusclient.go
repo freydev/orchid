@@ -35,3 +35,28 @@ func Post(baseURL, id, state string) error {
 	resp.Body.Close()
 	return nil
 }
+
+// Notify asks the orchid server to show a desktop notification that this
+// session's agent finished. message is optional. Best-effort, like Post.
+func Notify(baseURL, id, message string) error {
+	baseURL = strings.TrimRight(strings.TrimSpace(baseURL), "/")
+	if baseURL == "" || id == "" {
+		return nil
+	}
+	body, err := json.Marshal(map[string]any{"message": message})
+	if err != nil {
+		return err
+	}
+	req, err := http.NewRequest(http.MethodPost, baseURL+"/api/sessions/"+id+"/notify", bytes.NewReader(body))
+	if err != nil {
+		return err
+	}
+	req.Header.Set("Content-Type", "application/json")
+	c := &http.Client{Timeout: 2 * time.Second}
+	resp, err := c.Do(req)
+	if err != nil {
+		return err
+	}
+	resp.Body.Close()
+	return nil
+}

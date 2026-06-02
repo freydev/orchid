@@ -55,7 +55,7 @@ func newTestManager(t *testing.T) *Manager {
 func TestManagerCreateGetKill(t *testing.T) {
 	skipNoTmux(t)
 	m := newTestManager(t)
-	s, err := m.Create("p-1", "/tmp", "shell", "")
+	s, err := m.Create("p-1", "/tmp", "shell", CreateOpts{})
 	if err != nil {
 		t.Fatalf("create: %v", err)
 	}
@@ -81,7 +81,7 @@ func TestManagerCreateGetKill(t *testing.T) {
 func TestManagerNameAndRename(t *testing.T) {
 	skipNoTmux(t)
 	m := newTestManager(t)
-	s, err := m.Create("p-1", "/tmp", "shell", "  build server  ")
+	s, err := m.Create("p-1", "/tmp", "shell", CreateOpts{Name: "  build server  "})
 	if err != nil {
 		t.Fatalf("create: %v", err)
 	}
@@ -109,8 +109,8 @@ func TestManagerNameAndRename(t *testing.T) {
 func TestPruneStopped(t *testing.T) {
 	skipNoTmux(t)
 	m := newTestManager(t)
-	a, _ := m.Create("p-1", "/tmp", "shell", "")
-	b, _ := m.Create("p-1", "/tmp", "shell", "")
+	a, _ := m.Create("p-1", "/tmp", "shell", CreateOpts{})
+	b, _ := m.Create("p-1", "/tmp", "shell", CreateOpts{})
 	defer tmux.KillSession(a.Tmux)
 	defer tmux.KillSession(b.Tmux)
 	// Mark b stopped without touching tmux/live map directly: kill its tmux,
@@ -157,7 +157,7 @@ func TestOrphanSessions(t *testing.T) {
 
 func TestManagerCreateUnknownAgent(t *testing.T) {
 	m := newTestManager(t)
-	if _, err := m.Create("p-1", "/tmp", "nope", ""); err == nil {
+	if _, err := m.Create("p-1", "/tmp", "nope", CreateOpts{}); err == nil {
 		t.Fatal("expected error for unknown agent")
 	}
 }
@@ -165,7 +165,7 @@ func TestManagerCreateUnknownAgent(t *testing.T) {
 func TestStopRetainsRecord(t *testing.T) {
 	skipNoTmux(t)
 	m := newTestManager(t)
-	s, err := m.Create("p-1", "/tmp", "shell", "")
+	s, err := m.Create("p-1", "/tmp", "shell", CreateOpts{})
 	if err != nil {
 		t.Fatalf("create: %v", err)
 	}
@@ -207,9 +207,9 @@ func TestManagerKillUnknown(t *testing.T) {
 func TestKillByWorktree(t *testing.T) {
 	skipNoTmux(t)
 	m := newTestManager(t)
-	a, _ := m.Create("p-1", "/tmp/wtA", "shell", "")
-	b, _ := m.Create("p-1", "/tmp/wtA", "shell", "")
-	c, _ := m.Create("p-1", "/tmp/wtB", "shell", "")
+	a, _ := m.Create("p-1", "/tmp/wtA", "shell", CreateOpts{})
+	b, _ := m.Create("p-1", "/tmp/wtA", "shell", CreateOpts{})
+	c, _ := m.Create("p-1", "/tmp/wtB", "shell", CreateOpts{})
 	defer tmux.KillSession(a.Tmux)
 	defer tmux.KillSession(b.Tmux)
 	defer tmux.KillSession(c.Tmux)
@@ -231,7 +231,7 @@ func TestKillByWorktree(t *testing.T) {
 func TestSelfExitMarksStopped(t *testing.T) {
 	skipNoTmux(t)
 	m := newTestManager(t)
-	s, err := m.Create("p-1", "/tmp", "shell", "")
+	s, err := m.Create("p-1", "/tmp", "shell", CreateOpts{})
 	if err != nil {
 		t.Fatalf("create: %v", err)
 	}
@@ -315,7 +315,7 @@ func TestManagerConcurrentCreate(t *testing.T) {
 		wg.Add(1)
 		go func() {
 			defer wg.Done()
-			s, err := m.Create("p-1", "/tmp", "shell", "")
+			s, err := m.Create("p-1", "/tmp", "shell", CreateOpts{})
 			if err != nil {
 				t.Errorf("create: %v", err)
 				return
@@ -332,7 +332,7 @@ func TestManagerConcurrentCreate(t *testing.T) {
 func TestSignalStatusResolution(t *testing.T) {
 	skipNoTmux(t)
 	m := newTestManager(t)
-	s, err := m.Create("p-1", "/tmp", "shell", "")
+	s, err := m.Create("p-1", "/tmp", "shell", CreateOpts{})
 	if err != nil {
 		t.Fatalf("create: %v", err)
 	}
@@ -377,7 +377,7 @@ func TestSignalStatusResolution(t *testing.T) {
 func TestSessionActive(t *testing.T) {
 	skipNoTmux(t)
 	m := newTestManager(t)
-	s, err := m.Create("p-1", "/tmp", "shell", "")
+	s, err := m.Create("p-1", "/tmp", "shell", CreateOpts{})
 	if err != nil {
 		t.Fatalf("create: %v", err)
 	}
@@ -414,9 +414,9 @@ func TestReorderSessions(t *testing.T) {
 func TestKillByProject(t *testing.T) {
 	skipNoTmux(t)
 	m := newTestManager(t)
-	a, _ := m.Create("p-1", "/tmp/wtA", "shell", "")
-	b, _ := m.Create("p-1", "/tmp/wtB", "shell", "")
-	c, _ := m.Create("p-2", "/tmp/wtC", "shell", "")
+	a, _ := m.Create("p-1", "/tmp/wtA", "shell", CreateOpts{})
+	b, _ := m.Create("p-1", "/tmp/wtB", "shell", CreateOpts{})
+	c, _ := m.Create("p-2", "/tmp/wtC", "shell", CreateOpts{})
 	defer tmux.KillSession(a.Tmux)
 	defer tmux.KillSession(b.Tmux)
 	defer tmux.KillSession(c.Tmux)

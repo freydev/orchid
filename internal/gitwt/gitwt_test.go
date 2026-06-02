@@ -74,7 +74,7 @@ func TestAddOffDefaultBranch(t *testing.T) {
 		t.Fatal("side commit did not advance HEAD")
 	}
 
-	path, err := Add(repo, "feat/demo")
+	path, err := Add(repo, "feat/demo", "", true)
 	if err != nil {
 		t.Fatalf("Add: %v", err)
 	}
@@ -112,7 +112,7 @@ func TestAddListRemove(t *testing.T) {
 	if err != nil || len(wts) != 1 || !wts[0].IsMain {
 		t.Fatalf("initial List = %v, %v", wts, err)
 	}
-	path, err := Add(repo, "feat/demo")
+	path, err := Add(repo, "feat/demo", "", true)
 	if err != nil {
 		t.Fatalf("Add: %v", err)
 	}

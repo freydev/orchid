@@ -21,7 +21,7 @@ func newTestSession(t *testing.T, id string) *Session {
 	_ = tmux.KillSession(name)
 	rec := store.Record{ID: id, Agent: "shell", Cwd: "/tmp", Tmux: name, Status: "running"}
 	sh, _ := agent.Get("shell")
-	s, err := createSession(rec, sh, nil, nil)
+	s, err := createSession(rec, sh.NewCommand(rec.Cwd, rec.AgentSessionID), nil, nil)
 	if err != nil {
 		t.Fatalf("createSession: %v", err)
 	}

@@ -24,7 +24,7 @@ const statusMeta = (s) => ({
 
 const MONOKAI = {
   background: "#202020", foreground: "#f8f8f2", cursor: "#a6e22e", cursorAccent: "#202020",
-  selectionBackground: "rgba(124,156,255,0.30)",
+  selectionBackground: "rgba(232,139,176,0.30)",
   black: "#272822", brightBlack: "#75715e", red: "#f92672", brightRed: "#f92672",
   green: "#a6e22e", brightGreen: "#a6e22e", yellow: "#e6db74", brightYellow: "#f4bf75",
   blue: "#66d9ef", brightBlue: "#66d9ef", magenta: "#ae81ff", brightMagenta: "#ae81ff",
@@ -51,7 +51,83 @@ const ICONS = {
   power:   '<path d="M12 2.5v9"/><path d="M6 6.5a8.5 8.5 0 1 0 12 0"/>',
   grip:    '<circle cx="9" cy="6" r="1.1"/><circle cx="15" cy="6" r="1.1"/><circle cx="9" cy="12" r="1.1"/><circle cx="15" cy="12" r="1.1"/><circle cx="9" cy="18" r="1.1"/><circle cx="15" cy="18" r="1.1"/>',
   layers:  '<path d="M12 3l8 4.5-8 4.5-8-4.5L12 3z"/><path d="M4 12l8 4.5 8-4.5"/>',
+  gear:    '<circle cx="12" cy="12" r="3"/><path d="M19.4 15a1.65 1.65 0 0 0 .33 1.82l.06.06a2 2 0 1 1-2.83 2.83l-.06-.06a1.65 1.65 0 0 0-1.82-.33 1.65 1.65 0 0 0-1 1.51V21a2 2 0 0 1-4 0v-.09a1.65 1.65 0 0 0-1-1.51 1.65 1.65 0 0 0-1.82.33l-.06.06a2 2 0 1 1-2.83-2.83l.06-.06a1.65 1.65 0 0 0 .33-1.82 1.65 1.65 0 0 0-1.51-1H3a2 2 0 0 1 0-4h.09a1.65 1.65 0 0 0 1.51-1 1.65 1.65 0 0 0-.33-1.82l-.06-.06a2 2 0 1 1 2.83-2.83l.06.06a1.65 1.65 0 0 0 1.82.33H9a1.65 1.65 0 0 0 1-1.51V3a2 2 0 0 1 4 0v.09a1.65 1.65 0 0 0 1 1.51 1.65 1.65 0 0 0 1.82-.33l.06-.06a2 2 0 1 1 2.83 2.83l-.06.06a1.65 1.65 0 0 0-.33 1.82V9a1.65 1.65 0 0 0 1.51 1H21a2 2 0 0 1 0 4h-.09a1.65 1.65 0 0 0-1.51 1z"/>',
 };
+// curated accent colors for projects/sessions (mirrors the backend palette)
+const DOT_COLORS = [
+  { id: "blue", hex: "#7c9cff" }, { id: "green", hex: "#5fd39a" },
+  { id: "amber", hex: "#e9a23b" }, { id: "purple", hex: "#c98bdb" },
+  { id: "red", hex: "#e57373" }, { id: "cyan", hex: "#5fc8d3" },
+  { id: "pink", hex: "#e88bb0" }, { id: "slate", hex: "#8a93a6" },
+];
+const colorHex = (id) => (DOT_COLORS.find((c) => c.id === id) || {}).hex || null;
+const DEFAULT_ACCENT = "pink";
+// apply an accent color id to the live CSS variables (derives dim + bg tints)
+function applyAccent(id) {
+  const hex = colorHex(id) || colorHex(DEFAULT_ACCENT);
+  const h = hex.replace("#", "");
+  const r = parseInt(h.slice(0, 2), 16), g = parseInt(h.slice(2, 4), 16), b = parseInt(h.slice(4, 6), 16);
+  const dim = "rgb(" + Math.round(r * 0.78) + "," + Math.round(g * 0.78) + "," + Math.round(b * 0.78) + ")";
+  const root = document.documentElement.style;
+  root.setProperty("--accent", hex);
+  root.setProperty("--accent-dim", dim);
+  root.setProperty("--accent-bg", "rgba(" + r + "," + g + "," + b + ",0.12)");
+  root.setProperty("--accent-bg-2", "rgba(" + r + "," + g + "," + b + ",0.18)");
+  // terminal background: a very dark tint of the accent (accent 9% over a near-black base)
+  const t = (c) => Math.round(8 + c * 0.09);
+  const termbg = "#" + [t(r), t(g), t(b)].map((x) => x.toString(16).padStart(2, "0")).join("");
+  root.setProperty("--term-bg", termbg);
+  if (typeof MONOKAI !== "undefined") { MONOKAI.background = termbg; MONOKAI.cursorAccent = termbg; }
+  if (typeof panes !== "undefined") {
+    for (const p of panes.values()) {
+      if (p.term) { try { p.term.options.theme = Object.assign({}, p.term.options.theme, { background: termbg, cursorAccent: termbg }); } catch (_) {} }
+    }
+  }
+}
+const pcolStyle = (id) => { const h = colorHex(id); return h ? ' style="--pcol:' + h + '"' : ""; };
+const scolStyle = (id) => { const h = colorHex(id); return h ? ' style="--scol:' + h + '"' : ""; };
+// global settings cache (resolved shell, system shells, bind addr)
+let appSettings = { shell: "", shells: [], host: "", port: 0, addr: "" };
+async function loadSettings() {
+  try { appSettings = await (await fetch("/api/settings")).json(); } catch (e) { /* keep defaults */ }
+  applyAccent(appSettings.accent || DEFAULT_ACCENT);
+  applyRailWidth(appSettings.rail_width || 230);
+}
+
+/* ---------- Terminal sidebar (rail) resizing ---------- */
+const RAIL_MIN = 180, RAIL_MAX = 520;
+let railWidth = 230;
+function applyRailWidth(px) {
+  railWidth = Math.max(RAIL_MIN, Math.min(RAIL_MAX, Math.round(px) || 230));
+  document.documentElement.style.setProperty("--rail-w", railWidth + "px");
+}
+function persistRailWidth(px) {
+  appSettings.rail_width = Math.round(px);
+  fetch("/api/settings/rail-width", { method: "PUT", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ width: Math.round(px) }) }).catch(() => {});
+}
+function startRailResize(e) {
+  const view = e.target.closest(".focus-view");
+  if (!view) return;
+  e.preventDefault();
+  const cs = getComputedStyle(view);
+  const left = view.getBoundingClientRect().left + (parseFloat(cs.paddingLeft) || 0);
+  e.target.classList.add("dragging");
+  document.body.style.cursor = "col-resize";
+  document.body.style.userSelect = "none";
+  const move = (ev) => applyRailWidth(ev.clientX - left);
+  const up = () => {
+    document.removeEventListener("mousemove", move);
+    document.removeEventListener("mouseup", up);
+    e.target.classList.remove("dragging");
+    document.body.style.cursor = "";
+    document.body.style.userSelect = "";
+    for (const p of panes.values()) { try { p.fit.fit(); } catch (_) {} } // reflow xterm to new width
+    persistRailWidth(railWidth);
+  };
+  document.addEventListener("mousemove", move);
+  document.addEventListener("mouseup", up);
+}
+document.addEventListener("mousedown", (e) => { if (e.target.id === "railResize") startRailResize(e); });
 const icon = (n, sz = 16) =>
   `<svg width="${sz}" height="${sz}" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round">${ICONS[n] || ""}</svg>`;
 
@@ -76,16 +152,26 @@ const panes = new Map();
 const removingWt = new Set(); // worktree paths currently being removed (block actions everywhere)
 
 const sessName = (s) => ((s.name || "").trim()) || agentMeta(s.agent).label;
-// per-session action buttons: alive -> Stop (keep), stopped -> Restart; + rename, kill
+// agent badge, optionally with a session color marker (overrides agent color)
+function badgeHtml(agent, color, extraCls) {
+  const m = agentMeta(agent);
+  const inner = '<div class="agent-badge ' + esc(agent) + (extraCls ? " " + extraCls : "") + '">' + m.badge + "</div>";
+  if (!color) return inner;
+  return '<span class="s-badge-wrap">' + inner + '<span class="s-color" style="background:' + colorHex(color) + '"></span></span>';
+}
+// per-session action buttons: settings, then Stop (alive) / Restart (stopped), kill
 function actsHtml(s) {
   const toggle = s.alive
     ? '<button class="btn sm icon ghost" data-act="stop" title="Stop (keep session)">' + icon("power", 22) + "</button>"
     : '<button class="btn sm icon ghost" data-act="restart" title="Restart">' + icon("restart", 18) + "</button>";
-  return '<button class="btn sm icon ghost" data-act="rename" title="Rename">' + icon("edit", 18) + "</button>" +
+  return '<button class="btn sm icon ghost" data-act="settings" title="Session settings">' + icon("gear", 18) + "</button>" +
     toggle +
     '<button class="btn sm icon ghost danger" data-act="kill" title="Kill (delete session)">' + icon("x", 22) + "</button>";
 }
-const rd = (s) => ({ s, m: agentMeta(s.agent), st: statusMeta(s.status), name: sessName(s), acts: actsHtml(s) });
+// session subtitle: a "$ <command>" tag for preset sessions, else the agent cmd
+const stypeHtml = (s) => s.command ? '<span class="s-cmd-tag">$ ' + esc(s.command) + "</span>" : esc(agentMeta(s.agent).cmd);
+const rd = (s) => ({ s, m: agentMeta(s.agent), st: statusMeta(s.status), name: sessName(s), acts: actsHtml(s),
+  badgeLg: badgeHtml(s.agent, s.color, "lg"), badgeSm: badgeHtml(s.agent, s.color, ""), scol: scolStyle(s.color), stype: stypeHtml(s) });
 const esc = (x) => _.escape(x == null ? "" : x);
 
 function projDots(p) {
@@ -108,17 +194,17 @@ const tplProjRow = _.template(
   '</div>'
 );
 const tplSessRow = _.template(
-  '<div class="s-row" data-id="<%- s.id %>">' +
+  '<div class="s-row" data-id="<%- s.id %>"<%= scol %>>' +
     '<span class="grip" title="Drag to reorder">' + icon("grip", 14) + "</span>" +
-    '<div class="agent-badge <%- s.agent %> lg"><%- m.badge %></div>' +
-    '<div class="meta"><div class="sname"><%- name %></div><div class="stype"><%- m.cmd %></div></div>' +
+    "<%= badgeLg %>" +
+    '<div class="meta"><div class="sname"><%- name %></div><div class="stype"><%= stype %></div></div>' +
     '<div class="right"><div class="stat-w"><span class="status-pill <%- st.cls %>" data-status="<%- s.id %>"><span class="dot <%- st.cls %><%- st.pulse ? " pulse" : "" %>"></span><%- st.label %></span></div>' +
       '<div class="acts"><%= acts %></div></div>' +
   '</div>'
 );
 const tplRailItem = _.template(
-  '<div class="rail-item <%- active ? "active" : "" %>" data-id="<%- s.id %>">' +
-    '<span class="rail-drag" title="Drag to reorder"><div class="agent-badge <%- s.agent %>"><%- m.badge %></div></span>' +
+  '<div class="rail-item <%- active ? "active" : "" %>" data-id="<%- s.id %>"<%= scol %>>' +
+    '<span class="rail-drag" title="Drag to reorder"><%= badgeSm %></span>' +
     '<div class="meta"><div class="sname"><%- name %></div><div class="stype"><%- m.cmd %></div></div>' +
     '<span class="dot <%- st.cls %><%- st.pulse ? " pulse" : "" %>" data-status="<%- s.id %>"></span>' +
   '</div>'
@@ -147,7 +233,7 @@ function chipHtml(c) {
   const name = (c.name || "").trim() || m.label;
   const wt = parseBranch(c.worktree || "").rest;
   return '<div class="pc-chip">' +
-    '<div class="agent-badge ' + esc(c.agent) + '">' + m.badge + "</div>" +
+    badgeHtml(c.agent, c.color, "") +
     '<span class="cname">' + esc(name) + "</span>" +
     '<span class="dot ' + st.cls + (st.pulse ? " pulse" : "") + '"></span>' +
     '<span class="cwt mono">' + esc(wt) + "</span>" +
@@ -163,14 +249,17 @@ function projCard(p) {
   const body = list.length
     ? '<div class="pc-sessions">' + show.map(chipHtml).join("") + (more > 0 ? '<div class="pc-more">+' + more + " more</div>" : "") + "</div>"
     : '<div class="pc-empty">No sessions yet — open to start an agent or shell</div>';
-  return '<div class="proj-card" data-pid="' + esc(p.id) + '">' +
+  const desc = (p.description || "").trim() ? '<div class="pc-desc">' + esc(p.description) + "</div>" : "";
+  const branch = (p.branch || "").trim() ? '<span class="pc-branch" title="current branch">' + icon("branch", 12) + branchInline(p.branch) + "</span>" : "";
+  return '<div class="proj-card" data-pid="' + esc(p.id) + '"' + pcolStyle(p.color) + ">" +
     '<div class="pc-head">' +
       '<span class="grip" title="Drag to reorder">' + icon("grip", 14) + "</span>" +
-      icon("folder", 18) +
-      '<div class="pc-id"><div class="pc-name">' + esc(p.name) + '</div><div class="pc-path">' + esc(p.path) + "</div></div>" +
+      (colorHex(p.color) ? '<span class="pc-dot"></span>' : icon("folder", 18)) +
+      '<div class="pc-id"><div class="pc-name">' + esc(p.name) + branch + '</div><div class="pc-path">' + esc(p.path) + "</div>" + desc + "</div>" +
       '<div class="pc-meta">' +
         '<span class="stat" title="worktrees">' + icon("layers", 14) + " " + p.worktrees + "</span>" +
         '<span class="stat" title="sessions">' + icon("term", 14) + " " + p.sessions + "</span>" +
+        '<button class="pc-gear" data-projset="' + esc(p.id) + '" title="Project settings">' + icon("gear", 18) + "</button>" +
         '<button class="btn sm icon ghost danger proj-del" data-delproj="' + esc(p.id) + '" title="Delete project">' + icon("x", 22) + "</button>" +
         icon("chevR", 16) +
       "</div>" +
@@ -243,13 +332,15 @@ function detailBarHtml(proj) {
   const pruneBtn = stopped
     ? '<button class="btn sm ghost danger" id="prune" title="Remove stopped sessions">' + icon("trash", 14) + " Clear stopped (" + stopped + ")</button>"
     : "";
-  return '<div class="detail-bar">' +
+  return '<div class="detail-bar"' + pcolStyle(proj.color) + ">" +
     '<button class="db-back" id="backProjects" title="Back to projects">' + icon("back", 15) + "</button>" +
-    icon("folder", 16) +
+    (colorHex(proj.color) ? '<span class="pc-dot"></span>' : icon("folder", 16)) +
     '<span class="db-name">' + esc(proj.name) + "</span>" +
+    ((proj.branch || "").trim() ? '<span class="db-branch" title="current branch">' + icon("branch", 12) + branchInline(proj.branch) + "</span>" : "") +
     '<span class="db-path mono">' + esc(proj.path) + "</span>" +
     '<span class="db-meta mono">' + ns + " " + (ns === 1 ? "session" : "sessions") + " · " + nw + " wt</span>" +
     '<span class="spacer"></span>' + segHtml() + pruneBtn +
+    '<button class="btn sm icon ghost" id="projSet" title="Project settings">' + icon("gear", 19) + "</button>" +
     '<button class="btn sm" id="newWt">' + icon("branch", 14) + " Worktree</button>" +
   "</div>";
 }
@@ -285,11 +376,12 @@ function listBodyHtml() {
     const actions = removing
       ? '<span class="wt-removing"><span class="spinner"></span> Removing…</span>'
       : '<button class="btn ghost sm" data-newsess="' + esc(wt.path) + '">' + icon("plus", 13) + " Session</button>" +
-        (wt.is_main ? "" : '<button class="btn ghost sm danger" data-rmwt="' + esc(wt.path) + '" data-branch="' + esc(wt.branch) + '" title="Remove worktree">' + icon("kill", 12) + " Remove</button>");
+        (wt.is_main ? "" : '<button class="btn ghost sm danger" data-rmwt="' + esc(wt.path) + '" data-branch="' + esc(wt.branch) + '" title="Remove worktree">' + icon("x", 14) + " Remove</button>");
     return '<div class="wt-group' + (removing ? " removing" : "") + '" data-wtpath="' + esc(wt.path) + '"><div class="wt-group-head clickable" data-wtgroup="' + esc(wt.path) + '">' +
       '<span class="grip grip-wt" title="Drag to reorder">' + icon("grip", 13) + "</span>" +
       '<span class="wt-chev ' + (open ? "open" : "") + '">' + icon("chevR", 14) + "</span>" +
       '<span class="br" title="' + esc(wt.name) + '">' + icon("branch", 13) + branchInline(wt.name) + "</span>" +
+      ((wt.branch || "").trim() ? '<span class="wt-branch" title="git branch">' + icon("branch", 11) + esc(wt.branch) + "</span>" : "") +
       '<span class="count">· ' + rows.length + " session" + (rows.length === 1 ? "" : "s") + "</span><span class=\"spacer\"></span>" +
       actions +
       "</div>" + sessHtml + "</div>";
@@ -302,6 +394,12 @@ function wtName(path) {
   const wt = worktrees.find((w) => w.path === path);
   return wt ? wt.name : "";
 }
+// chip showing the git branch of a session's worktree (empty when unknown)
+function sessBranchChip(s) {
+  const wt = worktrees.find((w) => w.path === s.worktree);
+  const b = wt && (wt.branch || "").trim();
+  return b ? '<span class="wt-branch" title="git branch">' + icon("branch", 11) + esc(wt.branch) + "</span>" : "";
+}
 function gridShellHtml() {
   const full = cur.grid.length >= MAX_GRID;
   const chips = sessions.map((s) => {
@@ -309,7 +407,7 @@ function gridShellHtml() {
     const disabled = !on && full;
     const st = statusMeta(s.status);
     return '<button class="gchip ' + (on ? "on" : "") + " " + (disabled ? "disabled" : "") + '" data-gchip="' + s.id + '">' +
-      '<span class="dot ' + st.cls + '" data-status="' + s.id + '"></span>' + esc(agentMeta(s.agent).label) +
+      '<span class="dot ' + st.cls + '" data-status="' + s.id + '"></span>' + esc(sessName(s)) +
       '<span class="br" title="' + esc(wtName(s.worktree)) + '">' + branchInline(wtName(s.worktree)) + "</span></button>";
   }).join("");
   const selector = '<div class="grid-sel"><span class="lbl">Show in grid:</span>' +
@@ -322,12 +420,12 @@ function gridShellHtml() {
 }
 function paneHtml(s) {
   const m = agentMeta(s.agent), st = statusMeta(s.status);
-  return '<div class="term-pane" data-pane="' + s.id + '"><div class="term" style="flex:1;min-height:0"><div class="term-head">' +
+  return '<div class="term-pane" data-pane="' + s.id + '"><div class="term" style="flex:1;min-height:0"><div class="term-head"' + scolStyle(s.color) + ">" +
     '<span class="grip" title="Drag to reorder">' + icon("grip", 13) + "</span>" +
-    '<div class="agent-badge ' + esc(s.agent) + '">' + m.badge + "</div>" +
+    badgeHtml(s.agent, s.color, "") +
     '<div class="term-id"><div class="term-parent">' + icon("branch", 11) + branchInline(wtName(s.worktree)) + '</div><div class="t">' + esc(sessName(s)) + "</div></div>" +
     '<div class="spacer"></div><span class="status-pill ' + st.cls + '" data-status="' + s.id + '"><span class="dot ' + st.cls + (st.pulse ? " pulse" : "") + '"></span>' + st.label + "</span>" +
-    '<button class="btn sm icon ghost" data-act="rename" title="Rename">' + icon("edit", 16) + "</button>" +
+    '<button class="btn sm icon ghost" data-act="settings" title="Session settings">' + icon("gear", 16) + "</button>" +
     '<button class="btn sm icon ghost" data-expand="' + s.id + '" title="Open terminal">' + icon("expand", 16) + "</button></div>" +
     '<div class="pbody" style="flex:1;min-height:0;overflow:hidden;background:var(--term-bg)"></div></div></div>';
 }
@@ -392,6 +490,7 @@ function railHtml() {
 }
 function focusShellHtml() {
   return '<div class="focus-view"><div class="focus-rail" id="rail">' + railHtml() + "</div>" +
+    '<div class="rail-resizer" id="railResize" title="Drag to resize"></div>' +
     '<div class="focus-term" id="focusTerm"></div></div>';
 }
 function mountTerminal() {
@@ -409,10 +508,10 @@ function mountTerminal() {
 }
 function focusTermChrome(s) {
   const m = agentMeta(s.agent), st = statusMeta(s.status);
-  return '<div class="term" style="flex:1;min-height:0"><div class="term-head">' +
-    '<div class="agent-badge ' + esc(s.agent) + '">' + m.badge + "</div>" +
-    '<div class="term-id"><div class="term-parent">' + icon("branch", 11) + branchInline(wtName(s.worktree)) + '</div><div class="t">' + esc(sessName(s)) + "</div></div>" +
-    '<span class="tt">' + m.cmd + '</span><div class="spacer"></div>' +
+  return '<div class="term" style="flex:1;min-height:0"><div class="term-head"' + scolStyle(s.color) + ">" +
+    badgeHtml(s.agent, s.color, "") +
+    '<div class="term-id"><div class="term-parent">' + icon("branch", 11) + branchInline(wtName(s.worktree)) + '</div><div class="t-line"><div class="t">' + esc(sessName(s)) + "</div>" + sessBranchChip(s) + "</div></div>" +
+    '<span class="tt">' + (s.command ? '<span class="s-cmd-tag">$ ' + esc(s.command) + "</span>" : m.cmd) + '</span><div class="spacer"></div>' +
     '<span class="status-pill ' + st.cls + '" data-status="' + s.id + '"><span class="dot ' + st.cls + (st.pulse ? " pulse" : "") + '"></span>' + st.label + "</span>" +
     actsHtml(s) + "</div>" +
     '<div class="pbody" style="flex:1;min-height:0;overflow:hidden;background:var(--term-bg)"></div></div>';
@@ -568,16 +667,30 @@ function confirmDialog({ title, body, confirmLabel = "Confirm", danger = true })
   });
 }
 function newProjectModal() {
+  let color = "";
   modal(
     '<div class="m-head"><h2>New project</h2><p>A git repository directory (must contain .git).</p></div>' +
-    '<div class="m-body"><div class="field"><label>Name (optional)</label><input class="text" id="pname" placeholder="my-service" /></div>' +
-    '<div class="field"><label>Path</label><input class="text mono" id="ppath" placeholder="~/code/my-service" /></div></div>' +
+    '<div class="m-body">' +
+      fieldHtml("Name (optional)", null, '<input class="text" id="pname" placeholder="my-service" />') +
+      fieldHtml("Path", null, '<input class="text mono" id="ppath" placeholder="~/code/my-service" />') +
+      fieldHtml("Color", null, swatchesHtml(color, true, "No color")) +
+      fieldHtml("Description", null, '<textarea class="text area" id="pdesc" rows="2" placeholder="What is this project?"></textarea>') +
+      '<div class="frow">' +
+        fieldHtml("Shell", "default for sessions", shellSelectHtml("pshell", globalShellName())) +
+        fieldHtml("Base branch", "for new worktrees", '<input class="text mono" id="pbase" placeholder="main" />') +
+      "</div>" +
+    "</div>" +
     '<div class="m-foot"><button class="btn ghost" id="cancel">Cancel</button><button class="btn primary" id="ok">Create</button></div>',
     (mt, close) => {
+      wireSwatches(mt, (c) => { color = c; });
       mt.querySelector("#cancel").onclick = close;
       mt.querySelector("#ok").onclick = async () => {
         const r = await fetch("/api/projects", { method: "POST", headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({ name: mt.querySelector("#pname").value.trim(), path: mt.querySelector("#ppath").value.trim() }) });
+          body: JSON.stringify({
+            name: mt.querySelector("#pname").value.trim(), path: mt.querySelector("#ppath").value.trim(),
+            color, description: mt.querySelector("#pdesc").value.trim(),
+            shell: mt.querySelector("#pshell").value, base_branch: mt.querySelector("#pbase").value.trim(),
+          }) });
         if (!r.ok) { toast("Create project failed: " + (await r.text()).trim(), "error"); return; }
         close(); await refresh(); toast("Project added", "ok");
       };
@@ -587,17 +700,41 @@ function newWorktreeModal() {
   modal(
     '<div class="m-head"><h2>New worktree</h2><p id="wtDesc">Creates a new branch off the fresh default branch.</p></div>' +
     '<div class="m-body"><div class="field"><label>Branch</label><input class="text mono" id="branch" placeholder="feat/new-thing" /></div>' +
+      '<div class="field" id="fromField" style="display:none"><label>From branch<span class="fhint">base for the new branch</span></label><select class="text mono" id="from"></select></div>' +
+      '<label class="checkrow" id="fetchRow" style="display:none"><input type="checkbox" id="fetch" checked /><span>Fetch <code>origin/&lt;branch&gt;</code> first<span class="fhint">off — branch off the local copy</span></span></label>' +
       '<div class="load-status" id="wtStatus" style="display:none"><span class="spinner"></span><span class="step">Working…</span></div>' +
       '<div class="load-err" id="wtErr" style="display:none"></div></div>' +
     '<div class="m-foot"><button class="btn ghost" id="cancel">Cancel</button><button class="btn primary" id="ok" disabled>Create</button></div>',
     (mt, close) => {
       const cancel = mt.querySelector("#cancel"), ok = mt.querySelector("#ok"), input = mt.querySelector("#branch");
       const status = mt.querySelector("#wtStatus"), step = status.querySelector(".step"), errEl = mt.querySelector("#wtErr");
-      const desc = mt.querySelector("#wtDesc");
+      const desc = mt.querySelector("#wtDesc"), fromField = mt.querySelector("#fromField"), fromSel = mt.querySelector("#from");
+      const fetchRow = mt.querySelector("#fetchRow"), fetchBox = mt.querySelector("#fetch");
       let busy = false, git = null;
-      const setBusy = (on) => { busy = on; ok.disabled = on; cancel.disabled = on; input.disabled = on; };
+      const setBusy = (on) => { busy = on; ok.disabled = on; cancel.disabled = on; input.disabled = on; fromSel.disabled = on; fetchBox.disabled = on; };
 
-      // probe git info to show the real base + honest phases
+      // reflect whether the typed branch already exists: existing -> checkout (base
+      // irrelevant); new -> branch off the chosen "from", optionally fetched.
+      const sync = () => {
+        if (!git || !git.is_repo) return;
+        const name = input.value.trim();
+        const exists = (git.branches || []).includes(name);
+        fromField.style.opacity = exists ? ".45" : "";
+        fetchRow.style.opacity = exists ? ".45" : "";
+        fromSel.disabled = exists || busy;
+        fetchBox.disabled = exists || busy || !git.has_origin;
+        if (exists) {
+          desc.textContent = "Branch " + name + " exists — it will be checked out into the worktree.";
+          return;
+        }
+        const base = fromSel.value || git.default_branch;
+        const willFetch = git.has_origin && fetchBox.checked;
+        desc.textContent = willFetch
+          ? "New branch off origin/" + base + " (fetched fresh)."
+          : "New branch off local " + base + ".";
+      };
+
+      // probe git info to show the real base + populate the "from" picker
       fetch("/api/projects/" + cur.projectId + "/gitinfo").then((r) => r.json()).then((g) => {
         git = g;
         if (!g.is_repo) {
@@ -606,26 +743,38 @@ function newWorktreeModal() {
           input.disabled = true; ok.disabled = true;
           return;
         }
+        const branches = g.branches || [];
+        // preselect the project's configured base branch, else the repo default
+        const proj = projects.find((p) => p.id === cur.projectId) || {};
+        const want = (proj.base_branch || "").trim() || g.default_branch;
+        if (branches.length) {
+          const sel = branches.includes(want) ? want : g.default_branch;
+          fromSel.innerHTML = branches.map((b) => '<option value="' + esc(b) + '"' + (b === sel ? " selected" : "") + ">" + esc(b) + "</option>").join("");
+          fromField.style.display = "";
+        }
+        if (g.has_origin) fetchRow.style.display = "flex";
         ok.disabled = false;
-        desc.textContent = g.has_origin
-          ? "Branches off " + g.base + " (fetched fresh from origin)."
-          : "No origin remote — branches off local " + g.default_branch + ".";
+        sync();
       }).catch(() => { ok.disabled = false; });
 
+      input.addEventListener("input", sync);
+      fromSel.addEventListener("change", sync);
+      fetchBox.addEventListener("change", sync);
       cancel.onclick = () => { if (!busy) close(); };
       const submit = async () => {
         if (busy || ok.disabled) return;
         const branch = input.value.trim();
         if (!branch) { input.focus(); return; }
+        const exists = git && (git.branches || []).includes(branch);
+        const doFetch = !!(git && git.has_origin && !exists && fetchBox.checked);
         errEl.style.display = "none";
         setBusy(true);
         status.style.display = "flex";
-        const fetching = git && git.has_origin;
-        step.textContent = fetching ? "Fetching origin…" : "Creating worktree…";
-        const t = fetching ? setTimeout(() => { step.textContent = "Creating worktree…"; }, 700) : null;
+        step.textContent = doFetch ? "Fetching origin…" : "Creating worktree…";
+        const t = doFetch ? setTimeout(() => { step.textContent = "Creating worktree…"; }, 700) : null;
         try {
           const r = await fetch("/api/projects/" + cur.projectId + "/worktrees", { method: "POST", headers: { "Content-Type": "application/json" },
-            body: JSON.stringify({ branch }) });
+            body: JSON.stringify({ branch, from: fromSel.value, fetch: fetchBox.checked }) });
           if (t) clearTimeout(t);
           if (!r.ok) {
             status.style.display = "none";
@@ -653,44 +802,251 @@ function newSessionModal(defaultWt) {
   let sel = "claude";
   const opts = worktrees.filter((wt) => !removingWt.has(wt.path)).map((wt) => '<option value="' + esc(wt.path) + '"' + (wt.path === defaultWt ? " selected" : "") + ">" + esc(wt.name) + "</option>").join("");
   const grid = types.map((t) => '<button class="choice" data-type="' + t.id + '"><div class="agent-badge ' + t.id + ' lg">' + t.b + '</div><span class="lbl">' + t.l + '</span><span class="desc">' + t.d + "</span></button>").join("");
+  let color = "", cmdId = "";
+  // new shell sessions are preselected with the project's shell (falling back to global)
+  const proj = projects.find((p) => p.id === cur.projectId) || {};
+  const defShell = shellName(proj.shell) || globalShellName();
+  const presets = proj.commands || [];
+  const presetChips = '<button type="button" class="cmd-chip sel" data-cmd="">' + icon("term", 14) + " Plain shell</button>" +
+    presets.map((p) => '<button type="button" class="cmd-chip" data-cmd="' + esc(p.id) + '"><span class="cc-label">' + esc(p.label) + '</span><span class="cc-cmd mono">' + esc(p.cmd) + "</span></button>").join("");
+  const presetBody = presets.length
+    ? '<div class="cmd-presets">' + presetChips + "</div>"
+    : '<div class="cmd-presets">' + presetChips + '</div><div class="cmd-empty">No presets yet — add them in project settings.</div>';
   modal(
     '<div class="m-head"><h2>New session</h2></div>' +
-    '<div class="m-body"><div class="field"><label>Name (optional)</label><input class="text" id="sname" placeholder="router + sessions API" /></div>' +
-    '<div class="field"><label>Worktree</label><select class="text mono" id="wt">' + opts + "</select></div>" +
-    '<div class="field"><label>Type</label><div class="choice-grid">' + grid + "</div></div></div>" +
+    '<div class="m-body">' +
+      fieldHtml("Name (optional)", null, '<input class="text" id="sname" placeholder="router + sessions API" />') +
+      fieldHtml("Worktree", null, '<select class="text mono" id="wt">' + opts + "</select>") +
+      fieldHtml("Type", null, '<div class="choice-grid">' + grid + "</div>") +
+      fieldHtml("Color", null, swatchesHtml(color, true, "Agent default")) +
+      '<div class="field shell-field" id="cmdField" style="display:none"><label>Command preset<span class="fhint">opens a tmux session running it</span></label>' + presetBody + "</div>" +
+      '<div class="field shell-field" id="shellField" style="display:none">' +
+        '<label>Shell<span class="fhint">for this session</span></label>' +
+        shellSelectHtml("sshell", defShell) + "</div>" +
+    "</div>" +
     '<div class="m-foot"><button class="btn ghost" id="cancel">Cancel</button><button class="btn primary" id="ok">Start</button></div>',
     (mt, close) => {
       mt.querySelector("#cancel").onclick = close;
-      const mark = () => mt.querySelectorAll(".choice").forEach((x) => x.classList.toggle("sel", x.dataset.type === sel));
+      const shellField = mt.querySelector("#shellField"), cmdField = mt.querySelector("#cmdField");
+      const nameInput = mt.querySelector("#sname");
+      const mark = () => {
+        mt.querySelectorAll(".choice").forEach((x) => x.classList.toggle("sel", x.dataset.type === sel));
+        const isShell = sel === "shell";
+        shellField.style.display = isShell ? "" : "none";
+        cmdField.style.display = isShell ? "" : "none";
+      };
       mt.querySelectorAll(".choice").forEach((b) => b.onclick = () => { sel = b.dataset.type; mark(); });
+      // preset chip selection: updates cmdId + name placeholder
+      mt.querySelectorAll(".cmd-chip").forEach((c) => c.onclick = () => {
+        cmdId = c.dataset.cmd;
+        mt.querySelectorAll(".cmd-chip").forEach((x) => x.classList.toggle("sel", x === c));
+        const chosen = presets.find((p) => p.id === cmdId);
+        nameInput.placeholder = chosen ? chosen.label : "router + sessions API";
+      });
+      wireSwatches(mt, (c) => { color = c; });
       mark();
       mt.querySelector("#ok").onclick = async () => {
-        const r = await fetch("/api/sessions", { method: "POST", headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({ project: cur.projectId, worktree: mt.querySelector("#wt").value, agent: sel, name: mt.querySelector("#sname").value.trim() }) });
+        const chosen = sel === "shell" ? presets.find((p) => p.id === cmdId) : null;
+        const name = nameInput.value.trim() || (chosen ? chosen.label : "");
+        const body = { project: cur.projectId, worktree: mt.querySelector("#wt").value, agent: sel, name, color };
+        if (sel === "shell") { body.shell = mt.querySelector("#sshell").value; if (chosen) body.command = chosen.cmd; }
+        const r = await fetch("/api/sessions", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(body) });
         if (!r.ok) { toast("Create session failed: " + (await r.text()).trim(), "error"); return; }
         const s = await r.json(); close(); await refresh(); openTerminal(s.id);
       };
     });
 }
-function renameModal(s) {
+/* ---------- settings: reusable form-control builders ---------- */
+function fieldHtml(label, hint, control) {
+  return '<div class="field"><label>' + esc(label) + (hint ? '<span class="fhint">' + esc(hint) + "</span>" : "") + "</label>" + control + "</div>";
+}
+// color swatches; allowNone adds an "inherit/none" chip (value "")
+function swatchesHtml(value, allowNone, noneLabel) {
+  const none = allowNone
+    ? '<button type="button" class="swatch none' + (!value ? " sel" : "") + '" data-color="" title="' + esc(noneLabel || "Default") + '">' + icon("x", 12) + "</button>"
+    : "";
+  const sw = DOT_COLORS.map((c) =>
+    '<button type="button" class="swatch' + (value === c.id ? " sel" : "") + '" data-color="' + c.id + '" style="--sw:' + c.hex + '" title="' + c.id + '"></button>').join("");
+  return '<div class="swatches" data-swatches>' + none + sw + "</div>";
+}
+// bare shell name from a name-or-path ("/opt/homebrew/bin/fish" -> "fish")
+const shellName = (x) => { x = (x || "").trim(); return x ? (x.split("/").pop() || x) : ""; };
+// the resolved global shell name (from /api/shell), with sane fallbacks
+const globalShellName = () => shellName(AGENT.shell.cmd) || (appSettings.shells && appSettings.shells[0]) || "bash";
+// a concrete shell <select>, value preselected (added to the list if unknown)
+function shellSelectHtml(id, value) {
+  const names = (appSettings.shells && appSettings.shells.length) ? appSettings.shells : ["zsh", "bash", "fish", "sh"];
+  const v = shellName(value);
+  const opts = names.map((n) => '<option value="' + esc(n) + '"' + (v === n ? " selected" : "") + ">" + esc(n) + "</option>");
+  if (v && !names.includes(v)) opts.unshift('<option value="' + esc(v) + '" selected>' + esc(v) + "</option>");
+  return '<select class="text" id="' + id + '">' + opts.join("") + "</select>";
+}
+// attach swatch click behavior; onPick(colorId) fires with "" for none
+function wireSwatches(mt, onPick) {
+  const box = mt.querySelector("[data-swatches]");
+  if (!box) return;
+  box.addEventListener("click", (e) => {
+    const b = e.target.closest(".swatch");
+    if (!b) return;
+    box.querySelectorAll(".swatch").forEach((x) => x.classList.remove("sel"));
+    b.classList.add("sel");
+    onPick(b.dataset.color || "");
+  });
+}
+
+/* ---------- settings modals: global / project / session ---------- */
+function globalSettingsModal() {
+  const shellSel = shellSelectHtml("gshell", appSettings.shell || globalShellName());
+  let accent = appSettings.accent || DEFAULT_ACCENT;
   modal(
-    '<div class="m-head"><h2>Rename session</h2></div>' +
-    '<div class="m-body"><div class="field"><label>Name</label><input class="text" id="sname" placeholder="' + esc(agentMeta(s.agent).label) + '" /></div>' +
-      '<div class="faint" style="font-size:11.5px">Leave empty to fall back to the agent name.</div></div>' +
+    '<div class="m-head"><h2>Settings</h2><p>Global defaults. Projects and sessions can override these.</p></div>' +
+    '<div class="m-body">' +
+      '<div class="set-scope">' + icon("gear", 13) + " Global</div>" +
+      fieldHtml("Accent color", "UI theme", swatchesHtml(accent, false)) +
+      fieldHtml("Default shell", "for new terminals", shellSel) +
+      fieldHtml("Server port", "restart to apply",
+        '<div class="port-row"><input class="text mono" id="gport" value="' + esc(appSettings.port || "") + '" placeholder="8081" />' +
+        '<button class="btn icon" id="grestart" title="Restart the orchid daemon">' + icon("restart", 17) + "</button></div>") +
+      '<div class="set-soon mono">listening on ' + esc(appSettings.addr || "?") + "</div>" +
+    "</div>" +
     '<div class="m-foot"><button class="btn ghost" id="cancel">Cancel</button><button class="btn primary" id="ok">Save</button></div>',
     (mt, close) => {
-      const input = mt.querySelector("#sname");
-      input.value = (s.name || "").trim();
-      input.focus(); input.select();
       mt.querySelector("#cancel").onclick = close;
-      const save = async () => {
-        const name = input.value.trim();
-        const r = await fetch("/api/sessions/" + s.id, { method: "PATCH", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ name }) });
-        if (!r.ok) { toast("Rename failed: " + (await r.text()).trim(), "error"); return; }
-        close(); await refresh(); toast("Renamed", "ok");
+      wireSwatches(mt, (c) => { accent = c || DEFAULT_ACCENT; });
+      const persist = async () => {
+        const shell = mt.querySelector("#gshell").value;
+        const port = parseInt(mt.querySelector("#gport").value.trim(), 10) || 0;
+        const r = await fetch("/api/settings", { method: "PUT", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ shell, port, accent }) });
+        if (!r.ok) { toast("Save settings failed: " + (await r.text()).trim(), "error"); return null; }
+        const j = await r.json();
+        await loadSettings(); await loadShell();
+        return j;
       };
-      mt.querySelector("#ok").onclick = save;
-      input.addEventListener("keydown", (e) => { if (e.key === "Enter") save(); });
+      mt.querySelector("#ok").onclick = async () => { const j = await persist(); if (j) { close(); toast("Settings saved", "ok"); } };
+      mt.querySelector("#grestart").onclick = async () => {
+        const j = await persist();
+        if (!j) return;
+        const ok = await confirmDialog({ title: "Restart server?",
+          body: "The orchid daemon will restart" + (j.restart_needed ? " on the new port" : "") + ". Running sessions are kept (tmux); reload the page once it's back.",
+          confirmLabel: "Restart", danger: false });
+        if (!ok) return;
+        const rr = await fetch("/api/restart", { method: "POST" });
+        if (!rr.ok) { toast("Restart failed: " + (await rr.text()).trim(), "error"); return; }
+        const res = await rr.json();
+        close();
+        toast("Restarting — reload " + (res.addr || "the page") + " shortly", "ok");
+      };
+    });
+}
+
+function projectSettingsModal(p) {
+  let color = p.color || "";
+  modal(
+    '<div class="m-head"><h2>Project settings</h2><p class="mono">' + esc(p.path) + "</p></div>" +
+    '<div class="m-body">' +
+      '<div class="set-scope proj">' + icon("folder", 13) + " " + esc(p.name) + "</div>" +
+      fieldHtml("Name", null, '<input class="text" id="pname" />') +
+      fieldHtml("Color", null, swatchesHtml(color, true, "No color")) +
+      fieldHtml("Description", null, '<textarea class="text area" id="pdesc" rows="2" placeholder="What is this project?"></textarea>') +
+      '<div class="frow">' +
+        fieldHtml("Shell", "default for sessions", shellSelectHtml("pshell", p.shell || globalShellName())) +
+        fieldHtml("Base branch", "for new worktrees", '<select class="text mono" id="pbase"></select>') +
+      "</div>" +
+      '<div class="field"><label>Command presets<span class="fhint">selectable when starting a shell</span></label>' +
+        '<div class="cmd-editor" id="cmdEditor"></div>' +
+        '<button type="button" class="btn sm cmd-add" id="cmdAdd">' + icon("plus", 14) + " Add command</button></div>" +
+    "</div>" +
+    '<div class="m-foot"><button class="btn ghost" id="cancel">Cancel</button><button class="btn primary" id="ok">Save</button></div>',
+    (mt, close) => {
+      mt.querySelector("#pname").value = p.name || "";
+      mt.querySelector("#pdesc").value = p.description || "";
+      // command-presets editor: rows of (label, cmd) managed in the DOM
+      const cmdEditor = mt.querySelector("#cmdEditor");
+      const cmdRow = (c) => {
+        const row = document.createElement("div");
+        row.className = "cmd-row";
+        row.dataset.cid = c.id || "";
+        row.innerHTML = '<input class="text cmd-label-in" placeholder="label" />' +
+          '<input class="text mono cmd-cmd-in" placeholder="npm run dev" spellcheck="false" />' +
+          '<button type="button" class="btn sm icon ghost danger" title="Remove">' + icon("x", 18) + "</button>";
+        row.querySelector(".cmd-label-in").value = c.label || "";
+        row.querySelector(".cmd-cmd-in").value = c.cmd || "";
+        row.querySelector("button").onclick = () => { row.remove(); syncEmpty(); };
+        return row;
+      };
+      const syncEmpty = () => {
+        let e = cmdEditor.querySelector(".cmd-empty");
+        if (!cmdEditor.querySelector(".cmd-row")) { if (!e) { e = document.createElement("div"); e.className = "cmd-empty"; e.textContent = "No command presets. Add one to start tmux sessions running it."; cmdEditor.appendChild(e); } }
+        else if (e) e.remove();
+      };
+      (p.commands || []).forEach((c) => cmdEditor.appendChild(cmdRow(c)));
+      syncEmpty();
+      mt.querySelector("#cmdAdd").onclick = () => { cmdEditor.appendChild(cmdRow({})); syncEmpty(); cmdEditor.querySelector(".cmd-row:last-child .cmd-label-in").focus(); };
+      // base-branch picker: (repo default) + local branches; preselect saved value
+      const pbase = mt.querySelector("#pbase");
+      const want = (p.base_branch || "").trim();
+      const fillBase = (branches) => {
+        const set = new Set(branches);
+        const opts = ['<option value=""' + (!want ? " selected" : "") + ">(repo default)</option>"];
+        if (want && !set.has(want)) opts.push('<option value="' + esc(want) + '" selected>' + esc(want) + "</option>");
+        for (const b of branches) opts.push('<option value="' + esc(b) + '"' + (b === want ? " selected" : "") + ">" + esc(b) + "</option>");
+        pbase.innerHTML = opts.join("");
+      };
+      fillBase([]);
+      fetch("/api/projects/" + p.id + "/gitinfo").then((r) => r.json()).then((g) => { if (g.is_repo) fillBase(g.branches || []); }).catch(() => {});
+      wireSwatches(mt, (c) => { color = c; });
+      mt.querySelector("#cancel").onclick = close;
+      mt.querySelector("#ok").onclick = async () => {
+        const name = mt.querySelector("#pname").value.trim();
+        if (!name) { mt.querySelector("#pname").focus(); return; }
+        const commands = [...cmdEditor.querySelectorAll(".cmd-row")].map((row) => ({
+          id: row.dataset.cid || "", label: row.querySelector(".cmd-label-in").value.trim(), cmd: row.querySelector(".cmd-cmd-in").value.trim(),
+        })).filter((c) => c.label && c.cmd);
+        const body = { name, color, description: mt.querySelector("#pdesc").value.trim(), shell: mt.querySelector("#pshell").value, base_branch: mt.querySelector("#pbase").value.trim(), commands };
+        const r = await fetch("/api/projects/" + p.id, { method: "PATCH", headers: { "Content-Type": "application/json" }, body: JSON.stringify(body) });
+        if (!r.ok) { toast("Save failed: " + (await r.text()).trim(), "error"); return; }
+        close();
+        await loadProjects();
+        if (cur.projectId) await refresh(); else renderProjects();
+        toast("Project saved", "ok");
+      };
+    });
+}
+
+function sessionSettingsModal(s) {
+  let color = s.color || "";
+  const isShell = s.agent === "shell";
+  // preselect the session's own shell, else project, else global
+  const proj = projects.find((p) => p.id === s.project) || {};
+  const curShell = shellName(s.shell) || shellName(proj.shell) || globalShellName();
+  const shellField = isShell
+    ? fieldHtml("Shell", "for this session", shellSelectHtml("sshell", curShell))
+    : "";
+  modal(
+    '<div class="m-head"><h2>Session settings</h2><p><span class="mono">' + esc(agentMeta(s.agent).cmd) + "</span></p></div>" +
+    '<div class="m-body">' +
+      '<div class="set-scope sess">' + badgeHtml(s.agent, s.color, "") + " " + esc(sessName(s)) + "</div>" +
+      fieldHtml("Name", null, '<input class="text" id="sname" placeholder="' + esc(agentMeta(s.agent).label) + '" />') +
+      fieldHtml("Color", "overrides agent color", swatchesHtml(color, true, "Agent default")) +
+      shellField +
+      (isShell ? '<div class="faint" style="font-size:11.5px">Shell changes apply on the next restart.</div>' : "") +
+    "</div>" +
+    '<div class="m-foot"><button class="btn ghost" id="cancel">Cancel</button><button class="btn primary" id="ok">Save</button></div>',
+    (mt, close) => {
+      mt.querySelector("#sname").value = (s.name || "").trim();
+      wireSwatches(mt, (c) => { color = c; });
+      mt.querySelector("#cancel").onclick = close;
+      const input = mt.querySelector("#sname");
+      input.focus(); input.select();
+      mt.querySelector("#ok").onclick = async () => {
+        const body = { name: input.value.trim(), color };
+        if (isShell) body.shell = mt.querySelector("#sshell").value;
+        const r = await fetch("/api/sessions/" + s.id, { method: "PATCH", headers: { "Content-Type": "application/json" }, body: JSON.stringify(body) });
+        if (!r.ok) { toast("Save failed: " + (await r.text()).trim(), "error"); return; }
+        close(); await refresh();
+        if (cur.view === "terminal") renderDetail();
+        toast("Session saved", "ok");
+      };
     });
 }
 
@@ -700,9 +1056,9 @@ main.addEventListener("click", async (e) => {
     e.stopPropagation();
     const holder = act.closest("[data-id]") || act.closest("[data-pane]");
     const id = holder ? (holder.dataset.id || holder.dataset.pane) : cur.activeId;
-    if (act.dataset.act === "rename") {
+    if (act.dataset.act === "settings") {
       const s = sessions.find((x) => x.id === id);
-      if (s) renameModal(s);
+      if (s) sessionSettingsModal(s);
       return;
     }
     if (act.dataset.act === "kill") {
@@ -774,6 +1130,18 @@ main.addEventListener("click", async (e) => {
     const open = cur.collapsed[p] === undefined ? rows > 0 : !cur.collapsed[p];
     cur.collapsed[p] = open; // collapse if currently open, expand if collapsed
     renderDetail();
+    return;
+  }
+  const projset = e.target.closest("[data-projset]");
+  if (projset) {
+    e.stopPropagation();
+    const p = projects.find((x) => x.id === projset.dataset.projset);
+    if (p) projectSettingsModal(p);
+    return;
+  }
+  if (e.target.closest("#projSet")) {
+    const p = projects.find((x) => x.id === cur.projectId);
+    if (p) projectSettingsModal(p);
     return;
   }
   if (e.target.closest("#newProj")) { newProjectModal(); return; }
@@ -864,4 +1232,11 @@ async function pollStatus() {
 }
 setInterval(pollStatus, 3000);
 
-loadShell().finally(applyHash);
+// global settings gear lives in the topbar (outside #main); wire it directly
+const globalSetBtn = document.getElementById("globalSet");
+if (globalSetBtn) {
+  globalSetBtn.innerHTML = icon("gear", 18);
+  globalSetBtn.addEventListener("click", globalSettingsModal);
+}
+
+Promise.all([loadShell(), loadSettings()]).finally(applyHash);

@@ -44,6 +44,17 @@ const setStatusTool = `{
   }
 }`
 
+const notifyTool = `{
+  "name": "notify_done",
+  "description": "Show a desktop notification on the user's machine that you have finished working. Call this when you complete a task and want to get the user's attention (e.g. they stepped away). Optionally include a short summary as the message.",
+  "inputSchema": {
+    "type": "object",
+    "properties": {
+      "message": {"type": "string", "description": "Optional short summary of what was finished."}
+    }
+  }
+}`
+
 // Serve reads JSON-RPC requests from in and writes responses to out until EOF.
 func Serve(in io.Reader, out io.Writer) error {
 	enc := json.NewEncoder(out)
@@ -79,10 +90,11 @@ func handle(req rpcRequest) *rpcResponse {
 	case "notifications/initialized":
 		return nil
 	case "tools/list":
-		var tool any
-		_ = json.Unmarshal([]byte(setStatusTool), &tool)
+		var t1, t2 any
+		_ = json.Unmarshal([]byte(setStatusTool), &t1)
+		_ = json.Unmarshal([]byte(notifyTool), &t2)
 		return &rpcResponse{JSONRPC: "2.0", ID: req.ID, Result: map[string]any{
-			"tools": []any{tool},
+			"tools": []any{t1, t2},
 		}}
 	case "tools/call":
 		return callTool(req)
@@ -104,12 +116,16 @@ func callTool(req rpcRequest) *rpcResponse {
 	}
 	_ = json.Unmarshal(req.Params, &p)
 	text := "status not updated"
-	if p.Name == "set_status" {
+	switch p.Name {
+	case "set_status":
 		switch p.Arguments.State {
 		case "running", "idle", "requires_action":
 			_ = statusclient.Post(os.Getenv("ORCHID_URL"), os.Getenv("ORCHID_SESSION"), p.Arguments.State)
 			text = "status set to " + p.Arguments.State
 		}
+	case "notify_done":
+		_ = statusclient.Notify(os.Getenv("ORCHID_URL"), os.Getenv("ORCHID_SESSION"), p.Arguments.Message)
+		text = "notification sent"
 	}
 	return &rpcResponse{JSONRPC: "2.0", ID: req.ID, Result: map[string]any{
 		"content": []any{map[string]any{"type": "text", "text": text}},

@@ -90,6 +90,20 @@ func DefaultBranch(repo string) string {
 	return "HEAD"
 }
 
+// CurrentBranch returns the branch checked out in repo's main working tree, or
+// "" when detached HEAD or not resolvable.
+func CurrentBranch(repo string) string {
+	out, err := exec.Command("git", "-C", repo, "rev-parse", "--abbrev-ref", "HEAD").Output()
+	if err != nil {
+		return ""
+	}
+	b := strings.TrimSpace(string(out))
+	if b == "HEAD" { // detached
+		return ""
+	}
+	return b
+}
+
 // IsRepo reports whether path is usable as a git repository.
 func IsRepo(repo string) bool {
 	return exec.Command("git", "-C", repo, "rev-parse", "--git-dir").Run() == nil
@@ -109,30 +123,81 @@ func HasOrigin(repo string) bool {
 	return false
 }
 
-// freshBase resolves the start-point for new worktrees: always the default
-// branch, fetched fresh from origin when a remote is configured. If the fetch
-// fails (e.g. offline) it falls back to the local default branch.
-func freshBase(repo string) string {
-	def := DefaultBranch(repo)
-	if HasOrigin(repo) {
-		if err := exec.Command("git", "-C", repo, "fetch", "origin", def).Run(); err == nil {
-			return "origin/" + def
+// resolveBase resolves the start-point for new worktrees: the requested branch
+// (or the repo default when empty). When fetch is true and a remote is
+// configured, it fetches origin/<base> fresh and branches off origin/<base>;
+// otherwise (or if the fetch fails) it branches off the local branch.
+func resolveBase(repo, base string, fetch bool) string {
+	base = strings.TrimSpace(base)
+	if base == "" {
+		base = DefaultBranch(repo)
+	}
+	if fetch && HasOrigin(repo) {
+		if err := exec.Command("git", "-C", repo, "fetch", "origin", base).Run(); err == nil {
+			return "origin/" + base
 		}
 	}
-	return def
+	return base
 }
 
-// Add creates a new worktree on a NEW branch (off the fresh default branch —
-// origin/<default> when a remote exists, otherwise the local default branch)
-// under <repo>/.orchid/worktrees/<sani(branch)>. Returns the worktree's
-// absolute path with symlinks resolved (matching git worktree list output).
-func Add(repo, branch string) (string, error) {
-	if strings.TrimSpace(branch) == "" {
+// BaseRef reports the start-point label a new worktree would branch off, given a
+// project's configured base branch ("" -> repo default): "origin/<b>" when a
+// remote exists, else "<b>".
+func BaseRef(repo, base string) string {
+	base = strings.TrimSpace(base)
+	if base == "" {
+		base = DefaultBranch(repo)
+	}
+	if HasOrigin(repo) {
+		return "origin/" + base
+	}
+	return base
+}
+
+// BranchExists reports whether a local branch with this name exists.
+func BranchExists(repo, branch string) bool {
+	branch = strings.TrimSpace(branch)
+	if branch == "" {
+		return false
+	}
+	return exec.Command("git", "-C", repo, "rev-parse", "--verify", "--quiet", "refs/heads/"+branch).Run() == nil
+}
+
+// Branches lists local branch names (sorted by git's default for-each-ref order).
+func Branches(repo string) []string {
+	out, err := exec.Command("git", "-C", repo, "for-each-ref", "--format=%(refname:short)", "refs/heads").Output()
+	if err != nil {
+		return nil
+	}
+	var names []string
+	for _, line := range strings.Split(string(out), "\n") {
+		if s := strings.TrimSpace(line); s != "" {
+			names = append(names, s)
+		}
+	}
+	return names
+}
+
+// Add creates a worktree under <repo>/.orchid/worktrees/<sani(branch)>. If the
+// branch already exists it is checked out (base/fetch ignored); otherwise a NEW
+// branch is created off base — origin/<base> (fetched fresh) when fetch is true
+// and a remote exists, else the local base. base is the chosen start point; ""
+// means the repo default branch. Returns the worktree's absolute path with
+// symlinks resolved.
+func Add(repo, branch, base string, fetch bool) (string, error) {
+	branch = strings.TrimSpace(branch)
+	if branch == "" {
 		return "", fmt.Errorf("branch is required")
 	}
-	base := freshBase(repo)
 	path := filepath.Join(repo, ".orchid", "worktrees", sani(branch))
-	out, err := exec.Command("git", "-C", repo, "worktree", "add", path, "-b", branch, base).CombinedOutput()
+	var args []string
+	if BranchExists(repo, branch) {
+		// attach the existing branch (no new branch, base/fetch ignored)
+		args = []string{"-C", repo, "worktree", "add", path, branch}
+	} else {
+		args = []string{"-C", repo, "worktree", "add", path, "-b", branch, resolveBase(repo, base, fetch)}
+	}
+	out, err := exec.Command("git", args...).CombinedOutput()
 	if err != nil {
 		return "", fmt.Errorf("git worktree add: %w: %s", err, out)
 	}

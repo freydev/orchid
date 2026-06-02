@@ -9,14 +9,33 @@ import (
 	"os"
 	"path/filepath"
 	"sort"
+	"strings"
 	"sync"
 )
+
+// Preset is a named shell command a project can launch as a session.
+type Preset struct {
+	ID    string `json:"id"`
+	Label string `json:"label"`
+	Cmd   string `json:"cmd"`
+}
 
 // Project is a git repository orchid manages.
 type Project struct {
 	ID   string `json:"id"`
 	Name string `json:"name"`
 	Path string `json:"path"`
+	// Color is the project accent color id ("blue", "green"...), or "".
+	Color string `json:"color,omitempty"`
+	// Description is a free-form note shown on the project card.
+	Description string `json:"description,omitempty"`
+	// Shell overrides the default shell for this project's "shell" sessions
+	// (bare name or path). Empty inherits the global default.
+	Shell string `json:"shell,omitempty"`
+	// BaseBranch is the start point for new worktrees. Empty -> repo default.
+	BaseBranch string `json:"base_branch,omitempty"`
+	// Commands are named command presets selectable when starting a shell session.
+	Commands []Preset `json:"commands,omitempty"`
 	// WorktreeOrder is the user's preferred display order of worktree paths.
 	// Worktrees absent from this list sort after, in git order.
 	WorktreeOrder []string `json:"worktree_order,omitempty"`
@@ -97,6 +116,45 @@ func (s *Store) Add(name, path string) (Project, error) {
 	p := Project{ID: newID(), Name: name, Path: abs}
 	s.projects = append(s.projects, p)
 	return p, s.saveLocked()
+}
+
+// Update sets a project's editable settings. Name is applied only when
+// non-empty (a project must keep a name); the other fields are set verbatim,
+// so passing "" clears them.
+func (s *Store) Update(id, name, color, description, shell, baseBranch string, commands []Preset) error {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	for i := range s.projects {
+		if s.projects[i].ID == id {
+			if n := strings.TrimSpace(name); n != "" {
+				s.projects[i].Name = n
+			}
+			s.projects[i].Color = strings.TrimSpace(color)
+			s.projects[i].Description = strings.TrimSpace(description)
+			s.projects[i].Shell = strings.TrimSpace(shell)
+			s.projects[i].BaseBranch = strings.TrimSpace(baseBranch)
+			s.projects[i].Commands = sanitizePresets(commands)
+			return s.saveLocked()
+		}
+	}
+	return fmt.Errorf("project %q not found", id)
+}
+
+// sanitizePresets drops presets with an empty label or cmd and trims fields.
+func sanitizePresets(in []Preset) []Preset {
+	var out []Preset
+	for _, p := range in {
+		label, cmd := strings.TrimSpace(p.Label), strings.TrimSpace(p.Cmd)
+		if label == "" || cmd == "" {
+			continue
+		}
+		id := strings.TrimSpace(p.ID)
+		if id == "" {
+			id = newID()
+		}
+		out = append(out, Preset{ID: id, Label: label, Cmd: cmd})
+	}
+	return out
 }
 
 // Reorder sets the project display order to match ids. Projects whose id is not
