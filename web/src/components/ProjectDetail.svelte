@@ -3,6 +3,7 @@
   import { app } from '../lib/state.svelte';
   import DetailBar from './DetailBar.svelte';
   import Board from './Board.svelte';
+  import Grid from './Grid.svelte';
   import Terminal from './Terminal.svelte';
 
   const project = $derived<Project>(
@@ -17,7 +18,7 @@
   {#if app.cur.view === 'list'}
     <Board />
   {:else if app.cur.view === 'grid'}
-    <div class="detail-body">grid</div>
+    <Grid />
   {:else}
     <Terminal />
   {/if}
