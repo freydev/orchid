@@ -73,9 +73,13 @@
           {/if}
           <button class="btn sm icon ghost danger" title="Kill (delete session)" onclick={() => openModal('confirmKill', { session: active })}><Icon name="x" size={22} /></button>
         </div>
-        {#key active.id}
-          <div class="pbody" style="flex:1;min-height:0;overflow:hidden;background:var(--term-bg)" use:terminal={{ id: active.id }}></div>
-        {/key}
+        {#if active.alive}
+          {#key active.id}
+            <div class="pbody" style="flex:1;min-height:0;overflow:hidden;background:var(--term-bg)" use:terminal={{ id: active.id }}></div>
+          {/key}
+        {:else}
+          <div class="pbody" style="flex:1;min-height:0;display:grid;place-items:center;background:var(--term-bg)"><span class="faint">stopped — restart to attach</span></div>
+        {/if}
       </div>
     {:else}
       <div id="placeholder">no sessions — create one</div>

@@ -37,7 +37,11 @@
       <button class="btn sm icon ghost" title="Session settings" onclick={() => openModal('sessionSettings', { session })}><Icon name="gear" size={16} /></button>
       <button class="btn sm icon ghost" title="Open terminal" onclick={expand}><Icon name="expand" size={16} /></button>
     </div>
-    <div class="pbody" style="flex:1;min-height:0;overflow:hidden;background:var(--term-bg)" use:terminal={{ id: session.id, readonly: true, noResize: true }}></div>
+    {#if session.alive}
+      <div class="pbody" style="flex:1;min-height:0;overflow:hidden;background:var(--term-bg)" use:terminal={{ id: session.id, readonly: true, noResize: true }}></div>
+    {:else}
+      <div class="pbody" style="flex:1;min-height:0;display:grid;place-items:center;background:var(--term-bg)"><span class="faint">stopped — restart to attach</span></div>
+    {/if}
   </div>
 </div>
 
