@@ -2,6 +2,7 @@
   import type { Project } from '../lib/types';
   import { app } from '../lib/state.svelte';
   import DetailBar from './DetailBar.svelte';
+  import Terminal from './Terminal.svelte';
 
   const project = $derived<Project>(
     app.projects.find((p) => p.id === app.cur.projectId) ??
@@ -17,7 +18,7 @@
   {:else if app.cur.view === 'grid'}
     <div class="detail-body">grid</div>
   {:else}
-    <div class="detail-body">terminal</div>
+    <Terminal />
   {/if}
 </div>
 
