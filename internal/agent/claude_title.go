@@ -26,10 +26,15 @@ func claudeTranscript(agentSessionID string) string {
 
 // ClaudeTitle returns claude's auto-generated session title — the "ai-title"
 // shown by `claude -r` — for the given agent session id, or "" if none is
-// found. It reads only the tail of the transcript (titles are re-emitted
-// throughout the conversation, so a recent one is in the last chunk).
+// found.
 func ClaudeTitle(agentSessionID string) string {
-	path := claudeTranscript(agentSessionID)
+	return titleFromFile(claudeTranscript(agentSessionID))
+}
+
+// titleFromFile reads the tail of a claude transcript and returns the latest
+// "ai-title" (titles are re-emitted throughout, so a recent one is in the last
+// chunk).
+func titleFromFile(path string) string {
 	if path == "" {
 		return ""
 	}

@@ -28,6 +28,9 @@ func codexFlags() []string {
 		"-c", `mcp_servers.orchid.command="` + self + `"`,
 		"-c", `mcp_servers.orchid.args=["mcp"]`,
 		"-c", `developer_instructions="` + tomlEscape(codexStatusInstructions) + `"`,
+		// auto-approve MCP tool calls (orchid set_status / notify_done) so the
+		// status-reporting plumbing never blocks on an approval prompt.
+		"-c", `default_tools_approval_mode="auto"`,
 	}
 }
 

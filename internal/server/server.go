@@ -38,6 +38,7 @@ func (s *Server) SetRuntime(selfPath, host string, port int) {
 func (s *Server) routes() {
 	s.mux.HandleFunc("GET /api/sessions", s.handleList)
 	s.mux.HandleFunc("GET /api/shell", s.handleShell)
+	s.mux.HandleFunc("GET /api/claude-sessions", s.handleClaudeSessions)
 	s.mux.HandleFunc("POST /api/sessions", s.handleCreate)
 	s.mux.HandleFunc("POST /api/sessions/prune", s.handlePrune)
 	s.mux.HandleFunc("DELETE /api/sessions/{id}", s.handleKill)
@@ -61,6 +62,7 @@ func (s *Server) routes() {
 	s.mux.HandleFunc("PUT /api/projects/{id}/worktrees/order", s.handleWorktreesOrder)
 	s.mux.HandleFunc("DELETE /api/projects/{id}", s.handleRemoveProject)
 	s.mux.HandleFunc("GET /api/projects/{id}/gitinfo", s.handleGitInfo)
+	s.mux.HandleFunc("GET /api/projects/{id}/diff", s.handleDiff)
 	s.mux.HandleFunc("GET /api/projects/{id}/worktrees", s.handleWorktrees)
 	s.mux.HandleFunc("POST /api/projects/{id}/worktrees", s.handleAddWorktree)
 	s.mux.HandleFunc("DELETE /api/projects/{id}/worktrees", s.handleRemoveWorktree)

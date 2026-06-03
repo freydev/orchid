@@ -51,6 +51,7 @@ const ICONS = {
   power:   '<path d="M12 2.5v9"/><path d="M6 6.5a8.5 8.5 0 1 0 12 0"/>',
   grip:    '<circle cx="9" cy="6" r="1.1"/><circle cx="15" cy="6" r="1.1"/><circle cx="9" cy="12" r="1.1"/><circle cx="15" cy="12" r="1.1"/><circle cx="9" cy="18" r="1.1"/><circle cx="15" cy="18" r="1.1"/>',
   layers:  '<path d="M12 3l8 4.5-8 4.5-8-4.5L12 3z"/><path d="M4 12l8 4.5 8-4.5"/>',
+  diff:    '<path d="M5 4h9l5 5v10a1 1 0 0 1-1 1H5a1 1 0 0 1-1-1V5a1 1 0 0 1 1-1z"/><path d="M13.5 4v5h5"/><path d="M9 13h4M11 11v4"/><path d="M9 18h4"/>',
   gear:    '<circle cx="12" cy="12" r="3"/><path d="M19.4 15a1.65 1.65 0 0 0 .33 1.82l.06.06a2 2 0 1 1-2.83 2.83l-.06-.06a1.65 1.65 0 0 0-1.82-.33 1.65 1.65 0 0 0-1 1.51V21a2 2 0 0 1-4 0v-.09a1.65 1.65 0 0 0-1-1.51 1.65 1.65 0 0 0-1.82.33l-.06.06a2 2 0 1 1-2.83-2.83l.06-.06a1.65 1.65 0 0 0 .33-1.82 1.65 1.65 0 0 0-1.51-1H3a2 2 0 0 1 0-4h.09a1.65 1.65 0 0 0 1.51-1 1.65 1.65 0 0 0-.33-1.82l-.06-.06a2 2 0 1 1 2.83-2.83l.06.06a1.65 1.65 0 0 0 1.82.33H9a1.65 1.65 0 0 0 1-1.51V3a2 2 0 0 1 4 0v.09a1.65 1.65 0 0 0 1 1.51 1.65 1.65 0 0 0 1.82-.33l.06-.06a2 2 0 1 1 2.83 2.83l-.06.06a1.65 1.65 0 0 0-.33 1.82V9a1.65 1.65 0 0 0 1.51 1H21a2 2 0 0 1 0 4h-.09a1.65 1.65 0 0 0-1.51 1z"/>',
 };
 // curated accent colors for projects/sessions (mirrors the backend palette)
@@ -59,23 +60,70 @@ const DOT_COLORS = [
   { id: "amber", hex: "#e9a23b" }, { id: "purple", hex: "#c98bdb" },
   { id: "red", hex: "#e57373" }, { id: "cyan", hex: "#5fc8d3" },
   { id: "pink", hex: "#e88bb0" }, { id: "slate", hex: "#8a93a6" },
+  { id: "monokai", hex: "#f92672" },
 ];
 const colorHex = (id) => (DOT_COLORS.find((c) => c.id === id) || {}).hex || null;
 const DEFAULT_ACCENT = "pink";
 // apply an accent color id to the live CSS variables (derives dim + bg tints)
+// Re-tint the whole TUI palette toward the accent hue: surfaces, borders and
+// text are gray levels mixed toward the accent (the "phosphor" cast follows the
+// accent), while wait/idle/danger stay semantic.
+// canonical Monokai Classic palette — warm olive surfaces + pink accent, not a
+// single-hue tint (that's what makes it look like monokai).
+function applyMonokai() {
+  const root = document.documentElement.style;
+  const v = {
+    "--bg": "#1e1f1c", "--surface": "#272822", "--surface-2": "#2e2f28", "--surface-3": "#383a32",
+    "--border": "#41423b", "--border-2": "#565849",
+    "--text": "#f8f8f2", "--text-dim": "#a59f85", "--text-faint": "#75715e",
+    "--accent": "#f92672", "--accent-dim": "#c01f5b",
+    "--accent-bg": "rgba(249,38,114,0.14)", "--accent-bg-2": "rgba(249,38,114,0.22)",
+    "--ok": "#a6e22e", "--ok-bg": "rgba(166,226,46,0.14)",
+    "--wait": "#e6db74", "--wait-bg": "rgba(230,219,116,0.15)",
+    "--idle": "#75715e", "--danger": "#f92672",
+    "--term-bg": "#272822",
+  };
+  for (const k in v) root.setProperty(k, v[k]);
+  if (typeof MONOKAI !== "undefined") { MONOKAI.background = "#272822"; MONOKAI.cursorAccent = "#272822"; }
+  if (typeof panes !== "undefined") {
+    for (const p of panes.values()) {
+      if (p.term) { try { p.term.options.theme = Object.assign({}, p.term.options.theme, { background: "#272822", cursorAccent: "#272822" }); } catch (_) {} }
+    }
+  }
+}
+
 function applyAccent(id) {
+  if (id === "monokai") { applyMonokai(); return; }
   const hex = colorHex(id) || colorHex(DEFAULT_ACCENT);
   const h = hex.replace("#", "");
   const r = parseInt(h.slice(0, 2), 16), g = parseInt(h.slice(2, 4), 16), b = parseInt(h.slice(4, 6), 16);
-  const dim = "rgb(" + Math.round(r * 0.78) + "," + Math.round(g * 0.78) + "," + Math.round(b * 0.78) + ")";
   const root = document.documentElement.style;
+  const hx = (a) => "#" + a.map((x) => Math.max(0, Math.min(255, Math.round(x))).toString(16).padStart(2, "0")).join("");
+  // mix a neutral gray `level` toward the accent by weight w (0..1)
+  const tint = (level, w) => hx([level + (r - level) * w, level + (g - level) * w, level + (b - level) * w]);
+
   root.setProperty("--accent", hex);
-  root.setProperty("--accent-dim", dim);
+  root.setProperty("--accent-dim", hx([r * 0.72, g * 0.72, b * 0.72]));
   root.setProperty("--accent-bg", "rgba(" + r + "," + g + "," + b + ",0.12)");
-  root.setProperty("--accent-bg-2", "rgba(" + r + "," + g + "," + b + ",0.18)");
-  // terminal background: a very dark tint of the accent (accent 9% over a near-black base)
+  root.setProperty("--accent-bg-2", "rgba(" + r + "," + g + "," + b + ",0.20)");
+  // surfaces — near-black with a faint accent cast
+  root.setProperty("--bg", tint(7, 0.05));
+  root.setProperty("--surface", tint(13, 0.06));
+  root.setProperty("--surface-2", tint(20, 0.09));
+  root.setProperty("--surface-3", tint(28, 0.12));
+  root.setProperty("--border", tint(42, 0.18));
+  root.setProperty("--border-2", tint(62, 0.27));
+  // text — accent-tinted phosphor
+  root.setProperty("--text", tint(206, 0.10));
+  root.setProperty("--text-dim", tint(135, 0.18));
+  root.setProperty("--text-faint", tint(82, 0.20));
+  // "running"/ok follows the accent
+  root.setProperty("--ok", hex);
+  root.setProperty("--ok-bg", "rgba(" + r + "," + g + "," + b + ",0.12)");
+
+  // terminal background: a very dark tint of the accent
   const t = (c) => Math.round(8 + c * 0.09);
-  const termbg = "#" + [t(r), t(g), t(b)].map((x) => x.toString(16).padStart(2, "0")).join("");
+  const termbg = hx([t(r), t(g), t(b)]);
   root.setProperty("--term-bg", termbg);
   if (typeof MONOKAI !== "undefined") { MONOKAI.background = termbg; MONOKAI.cursorAccent = termbg; }
   if (typeof panes !== "undefined") {
@@ -168,11 +216,23 @@ function actsHtml(s) {
     toggle +
     '<button class="btn sm icon ghost danger" data-act="kill" title="Kill (delete session)">' + icon("x", 22) + "</button>";
 }
-// session subtitle: a "$ <command>" tag for preset sessions, else the agent cmd
-const stypeHtml = (s) => s.command ? '<span class="s-cmd-tag">$ ' + esc(s.command) + "</span>" : esc(agentMeta(s.agent).cmd);
+// the command/program label for a session: preset cmd > session shell choice > agent cmd
+const sessCmd = (s) => (s.agent === "shell" && (s.shell || "").trim()) ? shellName(s.shell) : agentMeta(s.agent).cmd;
+// session subtitle: a "$ <command>" tag for preset sessions, else the program
+const stypeHtml = (s) => s.command ? '<span class="s-cmd-tag">$ ' + esc(s.command) + "</span>" : esc(sessCmd(s));
 const rd = (s) => ({ s, m: agentMeta(s.agent), st: statusMeta(s.status), name: sessName(s), acts: actsHtml(s),
-  badgeLg: badgeHtml(s.agent, s.color, "lg"), badgeSm: badgeHtml(s.agent, s.color, ""), scol: scolStyle(s.color), stype: stypeHtml(s) });
+  badgeLg: badgeHtml(s.agent, s.color, "lg"), badgeSm: badgeHtml(s.agent, s.color, ""), scol: scolStyle(s.color), stype: stypeHtml(s), cmd: sessCmd(s) });
 const esc = (x) => _.escape(x == null ? "" : x);
+// compact relative time ("3m ago") for a timestamp string
+function relTime(iso) {
+  const t = Date.parse(iso);
+  if (!t) return "";
+  const s = Math.max(0, (Date.now() - t) / 1000);
+  if (s < 60) return "just now";
+  if (s < 3600) return Math.floor(s / 60) + "m ago";
+  if (s < 86400) return Math.floor(s / 3600) + "h ago";
+  return Math.floor(s / 86400) + "d ago";
+}
 
 function projDots(p) {
   const list = p.statuses || [];
@@ -205,7 +265,7 @@ const tplSessRow = _.template(
 const tplRailItem = _.template(
   '<div class="rail-item <%- active ? "active" : "" %>" data-id="<%- s.id %>"<%= scol %>>' +
     '<span class="rail-drag" title="Drag to reorder"><%= badgeSm %></span>' +
-    '<div class="meta"><div class="sname"><%- name %></div><div class="stype"><%- m.cmd %></div></div>' +
+    '<div class="meta"><div class="sname"><%- name %></div><div class="stype"><%- cmd %></div></div>' +
     '<span class="dot <%- st.cls %><%- st.pulse ? " pulse" : "" %>" data-status="<%- s.id %>"></span>' +
   '</div>'
 );
@@ -266,6 +326,33 @@ function projCard(p) {
     "</div>" + body +
   "</div>";
 }
+// bottom status bar (tmux/vim style): mode · context · session counts
+const statusbarEl = document.getElementById("statusbar");
+function updateStatusbar() {
+  if (!statusbarEl) return;
+  let list, ctx;
+  if (cur.projectId) {
+    list = sessions;
+    const proj = projects.find((p) => p.id === cur.projectId);
+    ctx = '<span class="accent">' + esc(proj ? proj.name : "project") + "</span> · " + esc(cur.view);
+  } else {
+    list = projects.flatMap((p) => p.session_list || []);
+    ctx = projects.length + " project" + (projects.length === 1 ? "" : "s");
+  }
+  const running = list.filter((s) => s.status === "running").length;
+  const waiting = list.filter((s) => s.status === "requires_action").length;
+  const idle = list.filter((s) => s.status === "idle" || s.status === "stopped").length;
+  statusbarEl.innerHTML =
+    '<div class="sb-seg sb-mode">orchid</div>' +
+    '<div class="sb-seg sb-ctx">' + ctx + "</div>" +
+    '<div class="spacer"></div>' +
+    '<div class="sb-counts">' +
+      '<span class="sb-count ok"><span class="dot ok"></span>' + running + " run</span>" +
+      '<span class="sb-count wait"><span class="dot wait"></span>' + waiting + " wait</span>" +
+      '<span class="sb-count idle"><span class="dot idle"></span>' + idle + " idle</span>" +
+    "</div>";
+}
+
 function renderProjects() {
   teardownAll();
   const all = projects.flatMap((p) => p.session_list || []);
@@ -288,6 +375,7 @@ function renderProjects() {
       body + "</div></div>";
   const pl = main.querySelector(".proj-list");
   if (pl) makeSortable(pl, ".proj-card", (el) => el.dataset.pid, orderProjects);
+  updateStatusbar();
 }
 
 /* ---------- drag-and-drop reordering ---------- */
@@ -324,7 +412,7 @@ function makeSortable(listEl, itemSel, getId, onDrop, handle) {
 function segHtml() {
   const b = (v, ic, label) =>
     '<button class="' + (cur.view === v ? "active" : "") + '" data-view="' + v + '">' + icon(ic, 14) + " " + label + "</button>";
-  return '<div class="seg">' + b("list", "list", "List") + b("grid", "grid", "Grid") + b("terminal", "term", "Terminal") + "</div>";
+  return '<div class="seg">' + b("list", "list", "Board") + b("grid", "grid", "Grid") + b("terminal", "term", "Terminal") + "</div>";
 }
 function detailBarHtml(proj) {
   const ns = sessions.length, nw = worktrees.length;
@@ -360,7 +448,35 @@ function renderDetail() {
   if (cur.view === "list") {
     const wg = main.querySelector(".wt-groups");
     if (wg) makeSortable(wg, ".wt-group", (el) => el.dataset.wtpath, orderWorktrees, ".grip-wt");
-    main.querySelectorAll(".sess-list").forEach((sl) => makeSortable(sl, ".s-row", (el) => el.dataset.id, orderSessions));
+    main.querySelectorAll(".cards").forEach((cl) => makeSortable(cl, ".s-card", (el) => el.dataset.id, orderSessions, ".sc-grip"));
+    mountListPreviews();
+  }
+  updateStatusbar();
+}
+
+// session card (Board view): badge+name+status head, live read-only xterm
+// preview, footer with worktree branch + actions.
+function sCardHtml(s) {
+  const st = statusMeta(s.status);
+  const preview = s.alive
+    ? '<div class="preview pbody" data-pane="' + s.id + '"></div>'
+    : '<div class="preview stopped"><span class="faint">stopped — restart to attach</span></div>';
+  const foot = sessBranchChip(s) || '<span class="up">' + esc(wtName(s.worktree)) + "</span>";
+  return '<div class="s-card" data-id="' + s.id + '"' + scolStyle(s.color) + ">" +
+    '<div class="head">' +
+      '<span class="sc-grip" title="Drag to reorder">' + badgeHtml(s.agent, s.color, "lg") + "</span>" +
+      '<div class="meta"><div class="sname">' + esc(sessName(s)) + '</div><div class="stype">' + stypeHtml(s) + "</div></div>" +
+      '<span class="status-pill ' + st.cls + '" data-status="' + s.id + '"><span class="dot ' + st.cls + (st.pulse ? " pulse" : "") + '"></span>' + st.label + "</span>" +
+    "</div>" +
+    preview +
+    '<div class="foot">' + foot + '<div class="acts">' + actsHtml(s) + "</div></div>" +
+  "</div>";
+}
+function mountListPreviews() {
+  for (const s of sessions) {
+    if (!s.alive) continue;
+    const pane = main.querySelector('.s-card[data-id="' + s.id + '"] .pbody');
+    if (pane) attachInto(pane, s.id, { noResize: true, readonly: true });
   }
 }
 
@@ -371,11 +487,12 @@ function listBodyHtml() {
     const open = cur.collapsed[wt.path] === undefined ? rows.length > 0 : !cur.collapsed[wt.path];
     const removing = removingWt.has(wt.path);
     const sessHtml = !open ? "" : (rows.length
-      ? '<div class="sess-list">' + rows.map((s) => tplSessRow(rd(s))).join("") + "</div>"
+      ? '<div class="cards">' + rows.map(sCardHtml).join("") + "</div>"
       : '<div class="faint" style="font-size:12.5px;padding:4px 2px 6px">no active sessions in this worktree</div>');
     const actions = removing
       ? '<span class="wt-removing"><span class="spinner"></span> Removing…</span>'
-      : '<button class="btn ghost sm" data-newsess="' + esc(wt.path) + '">' + icon("plus", 13) + " Session</button>" +
+      : '<button class="btn ghost sm" data-diff="' + esc(wt.path) + '" title="View diff">' + icon("diff", 14) + " Diff</button>" +
+        '<button class="btn ghost sm" data-newsess="' + esc(wt.path) + '">' + icon("plus", 13) + " Session</button>" +
         (wt.is_main ? "" : '<button class="btn ghost sm danger" data-rmwt="' + esc(wt.path) + '" data-branch="' + esc(wt.branch) + '" title="Remove worktree">' + icon("x", 14) + " Remove</button>");
     return '<div class="wt-group' + (removing ? " removing" : "") + '" data-wtpath="' + esc(wt.path) + '"><div class="wt-group-head clickable" data-wtgroup="' + esc(wt.path) + '">' +
       '<span class="grip grip-wt" title="Drag to reorder">' + icon("grip", 13) + "</span>" +
@@ -463,7 +580,8 @@ function railHtml() {
     const removing = removingWt.has(wt.path);
     const addBtn = removing
       ? '<span class="spinner" title="Removing worktree…"></span>'
-      : '<button class="rail-add" data-newsess="' + esc(wt.path) + '" title="New session in this worktree">+</button>';
+      : '<button class="rail-icon" data-diff="' + esc(wt.path) + '" title="View diff">' + icon("diff", 13) + "</button>" +
+        '<button class="rail-add" data-newsess="' + esc(wt.path) + '" title="New session in this worktree">+</button>';
     let head;
     const grip = '<span class="rail-drag grip-wt" title="Drag worktree to reorder">' + icon("branch", 11) + "</span>";
     if (wb.tag) {
@@ -511,7 +629,7 @@ function focusTermChrome(s) {
   return '<div class="term" style="flex:1;min-height:0"><div class="term-head"' + scolStyle(s.color) + ">" +
     badgeHtml(s.agent, s.color, "") +
     '<div class="term-id"><div class="term-parent">' + icon("branch", 11) + branchInline(wtName(s.worktree)) + '</div><div class="t-line"><div class="t">' + esc(sessName(s)) + "</div>" + sessBranchChip(s) + "</div></div>" +
-    '<span class="tt">' + (s.command ? '<span class="s-cmd-tag">$ ' + esc(s.command) + "</span>" : m.cmd) + '</span><div class="spacer"></div>' +
+    '<span class="tt">' + (s.command ? '<span class="s-cmd-tag">$ ' + esc(s.command) + "</span>" : esc(sessCmd(s))) + '</span><div class="spacer"></div>' +
     '<span class="status-pill ' + st.cls + '" data-status="' + s.id + '"><span class="dot ' + st.cls + (st.pulse ? " pulse" : "") + '"></span>' + st.label + "</span>" +
     actsHtml(s) + "</div>" +
     '<div class="pbody" style="flex:1;min-height:0;overflow:hidden;background:var(--term-bg)"></div></div>';
@@ -556,6 +674,21 @@ function attachInto(bodyEl, id, opts = {}) {
   ws.onopen = () => send();
   ws.onmessage = (e) => { if (e.data instanceof ArrayBuffer) term.write(new Uint8Array(e.data)); };
   ws.onclose = () => {};
+  // Shift+Enter inserts a newline instead of submitting. We deliver the newline
+  // as a one-character bracketed paste (CSI 200~ <CR> CSI 201~): claude, codex
+  // and bracketed-paste-aware shells (fish/zsh) insert pasted newlines literally
+  // instead of executing the line. We capture the keydown on the container and
+  // stopImmediatePropagation so xterm never also emits its default CR (a trailing
+  // bare CR would submit the just-inserted newline).
+  if (!ro_) {
+    bodyEl.addEventListener("keydown", (e) => {
+      if (e.key === "Enter" && e.shiftKey && !e.ctrlKey && !e.altKey && !e.metaKey) {
+        e.preventDefault();
+        e.stopImmediatePropagation();
+        if (ws.readyState === WebSocket.OPEN) ws.send(new TextEncoder().encode("\x1b[200~\r\x1b[201~"));
+      }
+    }, true);
+  }
   term.onData((d) => {
     // Drop xterm's auto-replies to terminal queries (CPR ESC[..R, Device
     // Attributes ESC[..c / ESC[?..c / ESC[>..c) and focus events (ESC[I / ESC[O).
@@ -666,6 +799,69 @@ function confirmDialog({ title, body, confirmLabel = "Confirm", danger = true })
     mount.querySelector("#cyes").focus();
   });
 }
+/* ---------- worktree diff viewer ---------- */
+const DSTAT = { modified: "M", added: "A", deleted: "D", renamed: "R" };
+function diffFileHtml(f, collapsed) {
+  const hunks = (f.hunks || []).map((h) =>
+    '<div class="dhunk"><div class="dhunk-head mono">' + esc(h.header) + "</div>" +
+    h.lines.map((ln) => {
+      const g = ln.t === "add" ? "+" : ln.t === "del" ? "−" : " ";
+      return '<div class="dline ' + ln.t + '"><span class="dgutter">' + g + '</span><span class="dcode mono">' + (esc(ln.text) || " ") + "</span></div>";
+    }).join("") + "</div>").join("");
+  return '<div class="dfile">' +
+    '<div class="dfile-head" data-dtoggle>' +
+      '<span class="dfile-chev' + (collapsed ? "" : " open") + '">' + icon("chevR", 13) + "</span>" +
+      '<span class="dstat ' + esc(f.status) + '">' + (DSTAT[f.status] || "M") + "</span>" +
+      '<span class="dpath mono">' + esc(f.path) + "</span><span class=\"spacer\"></span>" +
+      (f.add > 0 ? '<span class="dadd">+' + f.add + "</span>" : "") +
+      (f.del > 0 ? '<span class="ddel">−' + f.del + "</span>" : "") +
+    "</div>" +
+    '<div class="dhunks"' + (collapsed ? ' style="display:none"' : "") + ">" + hunks + "</div></div>";
+}
+function diffModal(wt) {
+  const mount = document.createElement("div");
+  mount.innerHTML = '<div class="scrim" id="dscrim"><div class="diff-modal">' +
+    '<div class="diff-head" id="dhead"><div class="dh-id"><div class="dh-title">' + icon("diff", 16) + " Diff</div>" +
+      '<div class="dh-wt mono">' + icon("branch", 12) + " " + esc(wt.name) + "</div></div><span class=\"spacer\"></span>" +
+      '<button class="btn sm icon ghost" id="dclose" title="Close">' + icon("x", 18) + "</button></div>" +
+    '<div class="diff-body" id="dbody"><div class="diff-empty">Loading…</div></div></div></div>';
+  document.body.appendChild(mount);
+  const close = () => { mount.remove(); document.removeEventListener("keydown", onKey); };
+  function onKey(e) { if (e.key === "Escape") close(); }
+  document.addEventListener("keydown", onKey);
+  mount.querySelector("#dscrim").addEventListener("mousedown", (e) => { if (e.target.id === "dscrim") close(); });
+  mount.querySelector("#dclose").onclick = close;
+  // collapse/expand a file
+  mount.querySelector("#dbody").addEventListener("click", (e) => {
+    const h = e.target.closest("[data-dtoggle]");
+    if (!h) return;
+    const file = h.closest(".dfile");
+    const open = !h.querySelector(".dfile-chev").classList.contains("open");
+    h.querySelector(".dfile-chev").classList.toggle("open", open);
+    file.querySelector(".dhunks").style.display = open ? "" : "none";
+  });
+  fetch("/api/projects/" + cur.projectId + "/diff?worktree=" + encodeURIComponent(wt.path))
+    .then((r) => r.ok ? r.json() : Promise.reject(new Error("HTTP " + r.status)))
+    .then((d) => {
+      const tot = (d.files || []).reduce((a, f) => ({ add: a.add + f.add, del: a.del + f.del }), { add: 0, del: 0 });
+      const modeLbl = d.mode === "uncommitted" ? "uncommitted" : "last commit";
+      mount.querySelector("#dhead").innerHTML =
+        '<div class="dh-id"><div class="dh-title">' + icon("diff", 16) + " Diff" +
+          '<span class="dh-mode ' + esc(d.mode).replace(/_/g, "-") + '">' + modeLbl + "</span></div>" +
+          '<div class="dh-wt mono">' + icon("branch", 12) + " " + esc(wt.name) + "</div></div>" +
+        '<div class="dh-meta"><span class="dh-ref mono">' + esc(d.ref) + '</span><span class="dh-sub">' + esc(d.sub) + "</span></div>" +
+        '<span class="spacer"></span><div class="dh-totals"><span class="dadd">+' + tot.add + '</span><span class="ddel">−' + tot.del + "</span></div>" +
+        '<button class="btn sm icon ghost" id="dclose" title="Close">' + icon("x", 18) + "</button>";
+      mount.querySelector("#dclose").onclick = close;
+      // collapse files by default when there are many, to keep the list scannable
+      const collapseAll = (d.files || []).length > 4;
+      mount.querySelector("#dbody").innerHTML = (d.files || []).length
+        ? d.files.map((f) => diffFileHtml(f, collapseAll)).join("")
+        : '<div class="diff-empty">No changes.</div>';
+    })
+    .catch((e) => { mount.querySelector("#dbody").innerHTML = '<div class="diff-empty">Failed to load diff: ' + esc(e.message) + "</div>"; });
+}
+
 function newProjectModal() {
   let color = "";
   modal(
@@ -819,6 +1015,7 @@ function newSessionModal(defaultWt) {
       fieldHtml("Worktree", null, '<select class="text mono" id="wt">' + opts + "</select>") +
       fieldHtml("Type", null, '<div class="choice-grid">' + grid + "</div>") +
       fieldHtml("Color", null, swatchesHtml(color, true, "Agent default")) +
+      '<div class="field claude-field" id="resumeField" style="display:none"><label>Resume Claude session<span class="fhint">import an existing conversation</span></label><select class="text" id="resume"><option value="">Start new conversation</option></select></div>' +
       '<div class="field shell-field" id="cmdField" style="display:none"><label>Command preset<span class="fhint">opens a tmux session running it</span></label>' + presetBody + "</div>" +
       '<div class="field shell-field" id="shellField" style="display:none">' +
         '<label>Shell<span class="fhint">for this session</span></label>' +
@@ -828,13 +1025,32 @@ function newSessionModal(defaultWt) {
     (mt, close) => {
       mt.querySelector("#cancel").onclick = close;
       const shellField = mt.querySelector("#shellField"), cmdField = mt.querySelector("#cmdField");
+      const resumeField = mt.querySelector("#resumeField"), resumeSel = mt.querySelector("#resume"), wtSel = mt.querySelector("#wt");
       const nameInput = mt.querySelector("#sname");
+      let resumeId = "", resumeLoadedCwd = null, resumeSessions = [];
+      // load resumable claude conversations for the selected worktree
+      const loadResume = async (cwd) => {
+        if (cwd === resumeLoadedCwd) return;
+        resumeLoadedCwd = cwd; resumeId = "";
+        try { resumeSessions = (await (await fetch("/api/claude-sessions?cwd=" + encodeURIComponent(cwd))).json()) || []; }
+        catch (e) { resumeSessions = []; }
+        resumeSel.innerHTML = '<option value="">Start new conversation</option>' +
+          resumeSessions.map((s) => '<option value="' + esc(s.id) + '">' + esc((s.title || ("session " + s.id.slice(0, 8))) + " · " + relTime(s.updated)) + "</option>").join("");
+      };
       const mark = () => {
         mt.querySelectorAll(".choice").forEach((x) => x.classList.toggle("sel", x.dataset.type === sel));
-        const isShell = sel === "shell";
+        const isShell = sel === "shell", isClaude = sel === "claude";
         shellField.style.display = isShell ? "" : "none";
         cmdField.style.display = isShell ? "" : "none";
+        resumeField.style.display = isClaude ? "" : "none";
+        if (isClaude) loadResume(wtSel.value);
       };
+      wtSel.addEventListener("change", () => { if (sel === "claude") loadResume(wtSel.value); });
+      resumeSel.addEventListener("change", () => {
+        resumeId = resumeSel.value;
+        const s = resumeSessions.find((x) => x.id === resumeId);
+        if (resumeId && s && s.title && !nameInput.value.trim()) nameInput.value = s.title;
+      });
       mt.querySelectorAll(".choice").forEach((b) => b.onclick = () => { sel = b.dataset.type; mark(); });
       // preset chip selection: updates cmdId + name placeholder
       mt.querySelectorAll(".cmd-chip").forEach((c) => c.onclick = () => {
@@ -850,6 +1066,7 @@ function newSessionModal(defaultWt) {
         const name = nameInput.value.trim() || (chosen ? chosen.label : "");
         const body = { project: cur.projectId, worktree: mt.querySelector("#wt").value, agent: sel, name, color };
         if (sel === "shell") { body.shell = mt.querySelector("#sshell").value; if (chosen) body.command = chosen.cmd; }
+        if (sel === "claude" && resumeId) body.resume_id = resumeId;
         const r = await fetch("/api/sessions", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(body) });
         if (!r.ok) { toast("Create session failed: " + (await r.text()).trim(), "error"); return; }
         const s = await r.json(); close(); await refresh(); openTerminal(s.id);
@@ -1123,6 +1340,14 @@ main.addEventListener("click", async (e) => {
   }
   const ns = e.target.closest("[data-newsess]");
   if (ns) { if (!removingWt.has(ns.dataset.newsess)) newSessionModal(ns.dataset.newsess); return; }
+  // diff button lives inside the clickable worktree head — check it first so it
+  // doesn't also toggle the group's collapse.
+  const dbtn0 = e.target.closest("[data-diff]");
+  if (dbtn0) {
+    const wt = worktrees.find((w) => w.path === dbtn0.dataset.diff);
+    if (wt) diffModal(wt);
+    return;
+  }
   const wtg = e.target.closest("[data-wtgroup]");
   if (wtg) {
     const p = wtg.dataset.wtgroup;
@@ -1168,6 +1393,8 @@ main.addEventListener("click", async (e) => {
   if (rail) { cur.activeId = rail.dataset.id; setHash(); updateRail(); const host = document.getElementById("focusTerm"); if (host) { teardownAll(); host.innerHTML = focusTermChrome(sessions.find((s) => s.id === cur.activeId)); const b = host.querySelector(".pbody"); if (b) attachInto(b, cur.activeId); } return; }
   const srow = e.target.closest(".s-row");
   if (srow) { openTerminal(srow.dataset.id); return; }
+  const scard = e.target.closest(".s-card");
+  if (scard && !e.target.closest("button") && !e.target.closest(".grip")) { openTerminal(scard.dataset.id); return; }
   const delproj = e.target.closest("[data-delproj]");
   if (delproj) {
     e.stopPropagation();
@@ -1229,6 +1456,7 @@ async function pollStatus() {
       }
     });
   }
+  updateStatusbar();
 }
 setInterval(pollStatus, 3000);
 

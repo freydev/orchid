@@ -26,6 +26,7 @@ type createReq struct {
 	Color    string `json:"color"`
 	Shell    string `json:"shell"`
 	Command  string `json:"command"`
+	ResumeID string `json:"resume_id"`
 }
 
 // sessPatchReq is the PATCH body for a session. Pointer fields distinguish
@@ -68,7 +69,7 @@ func (s *Server) handleCreate(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	sess, err := s.mgr.Create(req.Project, req.Worktree, req.Agent, session.CreateOpts{
-		Name: req.Name, Color: req.Color, Shell: req.Shell, Command: req.Command,
+		Name: req.Name, Color: req.Color, Shell: req.Shell, Command: req.Command, ResumeID: req.ResumeID,
 	})
 	if err != nil {
 		if strings.Contains(err.Error(), "unknown agent") {
@@ -96,6 +97,13 @@ func (s *Server) handleRename(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	writeJSON(w, http.StatusOK, map[string]any{"id": id})
+}
+
+// handleClaudeSessions lists resumable claude conversations recorded for the
+// ?cwd=<worktree path>, so the New Session modal can offer to import one.
+func (s *Server) handleClaudeSessions(w http.ResponseWriter, r *http.Request) {
+	cwd := r.URL.Query().Get("cwd")
+	writeJSON(w, http.StatusOK, agent.ClaudeSessions(cwd))
 }
 
 // handleShell reports the resolved shell launched for "shell" sessions, so the
@@ -475,6 +483,44 @@ func (s *Server) handleGitInfo(w http.ResponseWriter, r *http.Request) {
 	// repo default), so the worktree modal shows the real start point.
 	base := gitwt.BaseRef(proj.Path, proj.BaseBranch)
 	writeJSON(w, http.StatusOK, gitInfo{IsRepo: true, HasOrigin: hasOrigin, DefaultBranch: def, Base: base, Branches: gitwt.Branches(proj.Path)})
+}
+
+// handleDiff returns the diff for ?worktree=<path> of a project: uncommitted
+// changes vs HEAD, or HEAD~1..HEAD when the tree is clean.
+func (s *Server) handleDiff(w http.ResponseWriter, r *http.Request) {
+	proj, ok := s.projects.Get(r.PathValue("id"))
+	if !ok {
+		http.Error(w, "unknown project", http.StatusNotFound)
+		return
+	}
+	wtPath := r.URL.Query().Get("worktree")
+	if wtPath == "" {
+		http.Error(w, "worktree is required", http.StatusBadRequest)
+		return
+	}
+	// validate the worktree belongs to this project
+	wts, err := gitwt.List(proj.Path)
+	if err != nil {
+		http.Error(w, err.Error(), http.StatusInternalServerError)
+		return
+	}
+	valid := false
+	for _, wt := range wts {
+		if wt.Path == wtPath {
+			valid = true
+			break
+		}
+	}
+	if !valid {
+		http.Error(w, "worktree not found in project", http.StatusBadRequest)
+		return
+	}
+	d, err := gitwt.WorktreeDiff(wtPath)
+	if err != nil {
+		http.Error(w, err.Error(), http.StatusInternalServerError)
+		return
+	}
+	writeJSON(w, http.StatusOK, d)
 }
 
 func (s *Server) handleAddWorktree(w http.ResponseWriter, r *http.Request) {

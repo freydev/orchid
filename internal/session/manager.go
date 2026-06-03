@@ -169,10 +169,11 @@ func (m *Manager) onExit(id string) {
 
 // CreateOpts carries the optional per-session settings chosen at creation.
 type CreateOpts struct {
-	Name    string
-	Color   string
-	Shell   string // shell choice for "shell" sessions ("" = inherit)
-	Command string // preset command to run via `shell -c` (shell sessions only)
+	Name     string
+	Color    string
+	Shell    string // shell choice for "shell" sessions ("" = inherit)
+	Command  string // preset command to run via `shell -c` (shell sessions only)
+	ResumeID string // existing agent session id to resume/import (claude only)
 }
 
 func (m *Manager) Create(projectID, worktree, agentName string, opts CreateOpts) (*Session, error) {
@@ -181,6 +182,13 @@ func (m *Manager) Create(projectID, worktree, agentName string, opts CreateOpts)
 		return nil, fmt.Errorf("unknown agent %q", agentName)
 	}
 	id := newID()
+	// resume/import: bind to an existing agent session id and launch its resume
+	// command instead of a fresh one.
+	resume := strings.TrimSpace(opts.ResumeID) != ""
+	agentSessionID := uuid.NewString()
+	if resume {
+		agentSessionID = strings.TrimSpace(opts.ResumeID)
+	}
 	rec := store.Record{
 		ID:             id,
 		Name:           strings.TrimSpace(opts.Name),
@@ -189,14 +197,14 @@ func (m *Manager) Create(projectID, worktree, agentName string, opts CreateOpts)
 		Project:        projectID,
 		Worktree:       worktree,
 		Tmux:           "orchid-" + id,
-		AgentSessionID: uuid.NewString(),
+		AgentSessionID: agentSessionID,
 		Created:        time.Now().UTC(),
 		Status:         "running",
 		Color:          strings.TrimSpace(opts.Color),
 		Shell:          strings.TrimSpace(opts.Shell),
 		Command:        strings.TrimSpace(opts.Command),
 	}
-	s, err := createSession(rec, m.freshArgv(ag, rec, false), m.sessionEnv(id), func() { m.onExit(id) })
+	s, err := createSession(rec, m.freshArgv(ag, rec, resume), m.sessionEnv(id), func() { m.onExit(id) })
 	if err != nil {
 		return nil, err
 	}

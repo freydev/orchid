@@ -3,6 +3,7 @@
 <head>
   <meta charset="UTF-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <link rel="icon" type="image/svg+xml" href="/favicon.svg" />
   <title>orchid — AI dev dashboard</title>
   <link rel="preconnect" href="https://fonts.googleapis.com" />
   <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
@@ -13,13 +14,14 @@
 <body>
   <div class="app">
     <div class="topbar">
-      <div class="brand"><div class="mark">o</div>orchid<span class="ver">tmux · v0.5</span></div>
+      <div class="brand"><div class="mark"><svg viewBox="0 0 24 24" width="14" height="14" fill="currentColor"><g><ellipse cx="12" cy="6.2" rx="2.7" ry="4.3"/><ellipse cx="6.6" cy="9.8" rx="4" ry="2.7" transform="rotate(-38 6.6 9.8)"/><ellipse cx="17.4" cy="9.8" rx="4" ry="2.7" transform="rotate(38 17.4 9.8)"/><ellipse cx="8.7" cy="16.2" rx="2.7" ry="4" transform="rotate(-22 8.7 16.2)"/><ellipse cx="15.3" cy="16.2" rx="2.7" ry="4" transform="rotate(22 15.3 16.2)"/></g></svg></div>orchid<span class="ver">tmux · v0.5</span></div>
       <div class="spacer"></div>
       <span class="kbd">codex</span>
       <span class="kbd">claude</span>
       <button class="topbar-gear" id="globalSet" title="Settings"></button>
     </div>
     <div class="main" id="main"></div>
+    <div class="statusbar" id="statusbar"></div>
   </div>
   <script src="/vendor/underscore-min.js"></script>
   <script src="/vendor/xterm.js"></script>
