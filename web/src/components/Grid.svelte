@@ -3,7 +3,7 @@
   import { app, MAX_GRID } from '../lib/state.svelte';
   import { api } from '../lib/api';
   import { agentMeta, statusMeta } from '../lib/util';
-  import { dndzone } from 'svelte-dnd-action';
+  import { sortable } from '../actions/sortable';
   import BranchLabel from './ui/BranchLabel.svelte';
   import TermPane from './TermPane.svelte';
 
@@ -45,12 +45,9 @@
   }
 
   // dnd over panes (each pane is a Session with a stable id); reorder app.cur.grid
-  function onConsider(e: CustomEvent<{ items: Session[] }>) {
-    app.cur.grid = e.detail.items.map((s) => s.id);
-  }
-  function onFinalize(e: CustomEvent<{ items: Session[] }>) {
-    app.cur.grid = e.detail.items.map((s) => s.id);
-    api.orderGrid(app.cur.grid);
+  function onOrder(ids: string[]) {
+    app.cur.grid = ids;
+    api.orderGrid(ids);
   }
 </script>
 
@@ -85,7 +82,7 @@
     </div>
   {:else}
     <div class="term-grid" class:cols-1={app.cur.grid.length === 1}
-         use:dndzone={{ items: panes, flipDurationMs: 140 }} onconsider={onConsider} onfinalize={onFinalize}>
+         use:sortable={{ itemSel: '.term-pane', handle: '.grip', getId: (el) => el.dataset.pane!, onOrder }}>
       {#each panes as s (s.id)}
         <TermPane session={s} />
       {/each}

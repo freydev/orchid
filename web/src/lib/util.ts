@@ -14,3 +14,10 @@ export const parseBranch = (name:string) => { const i=name.indexOf('/'); return 
 export const shellName = (x?:string) => { x=(x||'').trim(); return x?(x.split('/').pop()||x):''; };
 export function relTime(iso:string){ const t=Date.parse(iso); if(!t) return ''; const s=Math.max(0,(Date.now()-t)/1000);
   if(s<60) return 'just now'; if(s<3600) return Math.floor(s/60)+'m ago'; if(s<86400) return Math.floor(s/3600)+'h ago'; return Math.floor(s/86400)+'d ago'; }
+// Reorder `arr` so its items follow the order of `keys` (by key). Items whose
+// key isn't in `keys` sink to the end, preserving relative order (stable sort).
+export function reorderBy<T>(arr:T[], keys:string[], keyFn:(x:T)=>string):T[]{
+  const pos = new Map(keys.map((k,i)=>[k,i] as const));
+  const at = (x:T) => pos.has(keyFn(x)) ? pos.get(keyFn(x))! : Infinity;
+  return [...arr].sort((a,b)=>at(a)-at(b));
+}

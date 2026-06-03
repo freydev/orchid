@@ -3,7 +3,8 @@
   import { app } from '../lib/state.svelte';
   import { api } from '../lib/api';
   import { openModal } from '../lib/modals.svelte';
-  import { dndzone } from 'svelte-dnd-action';
+  import { sortable } from '../actions/sortable';
+  import { reorderBy } from '../lib/util';
   import Icon from './ui/Icon.svelte';
   import BranchLabel from './ui/BranchLabel.svelte';
   import SessionCard from './SessionCard.svelte';
@@ -12,19 +13,14 @@
 
   const rows = $derived(app.sessions.filter((s) => s.worktree === wt.path));
 
-  // Rebuild app.sessions so this group's sessions take `newRows` order in place,
-  // preserving every other worktree's relative order, then persist the full id order.
-  function applyOrder(newRows: Session[]) {
+  // Reorder this worktree's sessions in `app.sessions` to follow `ids`, keeping
+  // every other worktree's sessions in place, then persist the full id order.
+  function onOrder(ids: string[]) {
+    const reordered = reorderBy(rows, ids, (s) => s.id);
     let i = 0;
     app.sessions = app.sessions.map((s) =>
-      s.worktree === wt.path ? newRows[i++] : s
+      s.worktree === wt.path ? reordered[i++] : s
     );
-  }
-  function onConsider(e: CustomEvent<{ items: Session[] }>) {
-    applyOrder(e.detail.items);
-  }
-  function onFinalize(e: CustomEvent<{ items: Session[] }>) {
-    applyOrder(e.detail.items);
     api.orderSessions(app.sessions.map((s) => s.id));
   }
   // default: empty worktrees collapsed, non-empty open; user toggle overrides
@@ -61,7 +57,7 @@
   </div>
   {#if open}
     {#if rows.length}
-      <div class="cards" use:dndzone={{ items: rows, flipDurationMs: 140, type: 'sess' }} onconsider={onConsider} onfinalize={onFinalize}>
+      <div class="cards" use:sortable={{ itemSel: '.s-card', handle: '.sc-grip', getId: (el) => el.dataset.id!, onOrder }}>
         {#each rows as s (s.id)}
           <SessionCard session={s} />
         {/each}

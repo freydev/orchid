@@ -13,6 +13,10 @@ html, body {
 
 ::selection { background: var(--accent-bg-2); }
 
+/* SortableJS drag feedback (ported from the vanilla app) */
+.drag-ghost { opacity: .4; }
+.sortable-chosen .grip, .sortable-chosen .sc-grip, .sortable-chosen .rail-drag { cursor: grabbing; }
+
 button { font-family: inherit; color: inherit; cursor: pointer; border: none; background: none; }
 input { font-family: inherit; }
 

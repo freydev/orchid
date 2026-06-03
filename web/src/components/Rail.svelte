@@ -2,19 +2,16 @@
   import type { Worktree, Session } from '../lib/types';
   import { app } from '../lib/state.svelte';
   import { api } from '../lib/api';
-  import { parseBranch } from '../lib/util';
+  import { parseBranch, reorderBy } from '../lib/util';
   import { openModal } from '../lib/modals.svelte';
-  import { dndzone } from 'svelte-dnd-action';
+  import { sortable } from '../actions/sortable';
   import Icon from './ui/Icon.svelte';
   import RailItem from './RailItem.svelte';
 
-  type WtItem = Worktree & { id: string };
-  // worktrees with their sessions + parsed branch label; `id` for the dndzone (keys on path)
-  type Group = { id: string; wt: WtItem; wb: ReturnType<typeof parseBranch>; rows: Session[]; removing: boolean };
+  type Group = { wt: Worktree; wb: ReturnType<typeof parseBranch>; rows: Session[]; removing: boolean };
   const groups = $derived<Group[]>(
     app.worktrees.map((wt) => ({
-      id: wt.path,
-      wt: { ...wt, id: wt.path } as WtItem,
+      wt,
       wb: parseBranch(wt.name),
       rows: app.sessions.filter((s) => s.worktree === wt.path),
       removing: app.removingWt.has(wt.path),
@@ -22,33 +19,23 @@
   );
 
   // --- worktree group reorder ---
-  // map each (possibly shadow) group back to its worktree by path
-  const toWts = (items: Group[]): Worktree[] =>
-    items.map((g) => app.worktrees.find((w) => w.path === g.id) ?? g.wt);
-  function onWtConsider(e: CustomEvent<{ items: Group[] }>) {
-    app.worktrees = toWts(e.detail.items);
-  }
-  function onWtFinalize(e: CustomEvent<{ items: Group[] }>) {
-    app.worktrees = toWts(e.detail.items);
-    if (app.cur.projectId) api.orderWorktrees(app.cur.projectId, app.worktrees.map((w) => w.path));
+  function onWtOrder(ids: string[]) {
+    app.worktrees = reorderBy(app.worktrees, ids, (w) => w.path);
+    if (app.cur.projectId) api.orderWorktrees(app.cur.projectId, ids);
   }
 
-  // --- per-worktree session reorder ---
-  function applyOrder(wtPath: string, newRows: Session[]) {
+  // --- per-worktree session reorder (block cross-worktree moves) ---
+  function onSessOrder(wtPath: string, ids: string[]) {
+    const rows = app.sessions.filter((s) => s.worktree === wtPath);
+    const reordered = reorderBy(rows, ids, (s) => s.id);
     let i = 0;
-    app.sessions = app.sessions.map((s) => (s.worktree === wtPath ? newRows[i++] : s));
-  }
-  function sessConsider(wtPath: string, e: CustomEvent<{ items: Session[] }>) {
-    applyOrder(wtPath, e.detail.items);
-  }
-  function sessFinalize(wtPath: string, e: CustomEvent<{ items: Session[] }>) {
-    applyOrder(wtPath, e.detail.items);
+    app.sessions = app.sessions.map((s) => (s.worktree === wtPath ? reordered[i++] : s));
     api.orderSessions(app.sessions.map((s) => s.id));
   }
 </script>
 
-<div class="rail-groups" use:dndzone={{ items: groups, flipDurationMs: 140, type: 'rail-wt' }} onconsider={onWtConsider} onfinalize={onWtFinalize}>
-{#each groups as g (g.id)}
+<div class="rail-groups" use:sortable={{ itemSel: '.rail-group', handle: '.grip-wt', getId: (el) => el.dataset.wtpath!, onOrder: onWtOrder }}>
+{#each groups as g (g.wt.path)}
   <div class="rail-group" class:removing={g.removing} data-wtpath={g.wt.path}>
     {#if g.wb.tag}
       <div class="rail-head" title={g.wt.name}>
@@ -81,9 +68,7 @@
     {/if}
     {#if g.rows.length}
       <div class="rail-list"
-           use:dndzone={{ items: g.rows, flipDurationMs: 140, type: 'rail-sess' }}
-           onconsider={(e) => sessConsider(g.wt.path, e)}
-           onfinalize={(e) => sessFinalize(g.wt.path, e)}>
+           use:sortable={{ itemSel: '.rail-item', handle: '.rail-drag', getId: (el) => el.dataset.id!, onOrder: (ids) => onSessOrder(g.wt.path, ids) }}>
         {#each g.rows as s (s.id)}
           <RailItem session={s} active={s.id === app.cur.activeId} />
         {/each}
