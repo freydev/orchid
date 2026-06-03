@@ -5,6 +5,8 @@
   import Statusbar from './components/Statusbar.svelte';
   import Toasts from './components/ui/Toasts.svelte';
   import Icon from './components/ui/Icon.svelte';
+  import Confirm from './components/Confirm.svelte';
+  import { modal, confirmState } from './lib/modals.svelte';
   // (global settings modal wiring comes in a later task)
 </script>
 
@@ -26,6 +28,15 @@
   </div>
   <Statusbar />
   <Toasts />
+
+  {#if confirmState.open}<Confirm />{/if}
+
+  <!-- modal host — extend this chain as modal components land in later tasks -->
+  {#if modal.kind}
+    {#if modal.kind === 'newProject'}
+      <!-- <NewProject {...modal.props} /> -->
+    {/if}
+  {/if}
 </div>
 
 <style>
