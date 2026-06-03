@@ -23,3 +23,35 @@ input { font-family: inherit; }
 ::-webkit-scrollbar-thumb:hover { background: #44444f; background-clip: padding-box; }
 
 .app { display: flex; flex-direction: column; height: 100%; }
+
+/* buttons (global — used across the app) */
+.btn {
+  display: inline-flex; align-items: center; gap: 7px;
+  height: 34px; padding: 0 14px; border-radius: var(--radius-sm);
+  font-size: 13px; font-weight: 500; white-space: nowrap;
+  background: var(--surface-2); border: 1px solid var(--border-2);
+  color: var(--text); transition: background .12s, border-color .12s, transform .06s;
+}
+.btn:hover { background: var(--surface-3); border-color: #3d3d49; }
+.btn:active { transform: translateY(1px); }
+.btn.primary { background: var(--accent); color: #0a0a14; border-color: transparent; font-weight: 600; }
+.btn.primary:hover { background: color-mix(in srgb, var(--accent) 82%, #fff); }
+.btn.ghost { background: transparent; border-color: transparent; color: var(--text-dim); }
+.btn.ghost:hover { background: var(--surface-2); color: var(--text); }
+.btn.icon { width: 34px; padding: 0; justify-content: center; }
+.btn.sm { height: 28px; padding: 0 10px; font-size: 12px; }
+.btn.sm.icon { width: 28px; }
+.btn.danger:hover { border-color: var(--danger); color: var(--danger); }
+.btn.danger-solid { background: var(--danger); color: #1a0c0c; border-color: transparent; font-weight: 600; }
+.btn.danger-solid:hover { background: #ef8585; }
+.btn:disabled { opacity: .55; cursor: not-allowed; }
+/* bigger session-action icon buttons (rename / restart / kill / expand) */
+.s-row .acts .btn.sm.icon, .term-head .btn.sm.icon, .detail-bar .btn.sm.icon { width: 34px; height: 34px; }
+.btn:disabled:hover { background: var(--surface-2); border-color: var(--border-2); }
+.btn.primary:disabled:hover { background: var(--accent); }
+
+/* inline loader / status (modals) */
+.spinner { width: 15px; height: 15px; border-radius: 50%; border: 2px solid var(--border-2); border-top-color: var(--accent); animation: spin .7s linear infinite; flex-shrink: 0; }
+@keyframes spin { to { transform: rotate(360deg); } }
+.load-status { display: flex; align-items: center; gap: 10px; color: var(--text-dim); font-size: 13px; padding: 2px 0; }
+.load-err { color: var(--danger); font-size: 12.5px; font-family: var(--mono); word-break: break-word; }
