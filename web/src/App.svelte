@@ -6,7 +6,10 @@
   import Toasts from './components/ui/Toasts.svelte';
   import Icon from './components/ui/Icon.svelte';
   import Confirm from './components/Confirm.svelte';
-  import { modal, confirmState } from './lib/modals.svelte';
+  import NewProject from './components/modals/NewProject.svelte';
+  import NewWorktree from './components/modals/NewWorktree.svelte';
+  import NewSession from './components/modals/NewSession.svelte';
+  import { modal, confirmState, closeModal } from './lib/modals.svelte';
   // (global settings modal wiring comes in a later task)
 </script>
 
@@ -32,10 +35,9 @@
   {#if confirmState.open}<Confirm />{/if}
 
   <!-- modal host — extend this chain as modal components land in later tasks -->
-  {#if modal.kind}
-    {#if modal.kind === 'newProject'}
-      <!-- <NewProject {...modal.props} /> -->
-    {/if}
+  {#if modal.kind === 'newProject'}<NewProject onclose={closeModal} />
+  {:else if modal.kind === 'newWorktree'}<NewWorktree onclose={closeModal} />
+  {:else if modal.kind === 'newSession'}<NewSession {...modal.props} onclose={closeModal} />
   {/if}
 </div>
 
