@@ -12,6 +12,7 @@
   import GlobalSettings from './components/modals/GlobalSettings.svelte';
   import ProjectSettings from './components/modals/ProjectSettings.svelte';
   import SessionSettings from './components/modals/SessionSettings.svelte';
+  import DiffViewer from './components/modals/DiffViewer.svelte';
   import { modal, confirmState, closeModal, openModal } from './lib/modals.svelte';
 </script>
 
@@ -43,6 +44,7 @@
   {:else if modal.kind === 'globalSettings'}<GlobalSettings onclose={closeModal} />
   {:else if modal.kind === 'projectSettings'}<ProjectSettings {...modal.props} onclose={closeModal} />
   {:else if modal.kind === 'sessionSettings'}<SessionSettings {...modal.props} onclose={closeModal} />
+  {:else if modal.kind === 'diff'}<DiffViewer {...modal.props} onclose={closeModal} />
   {/if}
 </div>
 
