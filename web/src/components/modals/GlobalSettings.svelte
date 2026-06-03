@@ -7,7 +7,7 @@
   import { confirm, closeModal } from '../../lib/modals.svelte';
   import { applyAccent, applyMonokai, DEFAULT_ACCENT } from '../../lib/theme';
   import { shellName } from '../../lib/util';
-  import { toast } from '../../lib/toast';
+  import { toast } from '../../lib/toast.svelte';
 
   let { onclose }: { onclose: () => void } = $props();
 

@@ -4,7 +4,7 @@
   import Badge from '../ui/Badge.svelte';
   import { app, refresh } from '../../lib/state.svelte';
   import { api } from '../../lib/api';
-  import { toast } from '../../lib/toast';
+  import { toast } from '../../lib/toast.svelte';
   import { agentMeta, shellName } from '../../lib/util';
   import type { Session } from '../../lib/types';
 

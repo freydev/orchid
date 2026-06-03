@@ -5,7 +5,7 @@
   import Icon from '../ui/Icon.svelte';
   import { app, refresh } from '../../lib/state.svelte';
   import { api } from '../../lib/api';
-  import { toast } from '../../lib/toast';
+  import { toast } from '../../lib/toast.svelte';
   import { shellName, relTime } from '../../lib/util';
   import { setHash } from '../../lib/router';
   import type { ClaudeSession } from '../../lib/types';

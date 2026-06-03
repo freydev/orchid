@@ -4,7 +4,7 @@
   import Icon from '../ui/Icon.svelte';
   import { app, refresh, loadProjects } from '../../lib/state.svelte';
   import { api } from '../../lib/api';
-  import { toast } from '../../lib/toast';
+  import { toast } from '../../lib/toast.svelte';
   import { shellName } from '../../lib/util';
   import type { Project, Preset } from '../../lib/types';
 

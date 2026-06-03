@@ -3,7 +3,7 @@
   import Swatches from '../ui/Swatches.svelte';
   import { app, refresh } from '../../lib/state.svelte';
   import { api } from '../../lib/api';
-  import { toast } from '../../lib/toast';
+  import { toast } from '../../lib/toast.svelte';
   import { shellName } from '../../lib/util';
 
   let { onclose }: { onclose: () => void } = $props();
