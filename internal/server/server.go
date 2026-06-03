@@ -1,6 +1,7 @@
 package server
 
 import (
+	"io/fs"
 	"net/http"
 
 	"orchid/internal/project"
@@ -68,5 +69,6 @@ func (s *Server) routes() {
 	s.mux.HandleFunc("DELETE /api/projects/{id}/worktrees", s.handleRemoveWorktree)
 
 	s.mux.HandleFunc("GET /ws/{id}", s.handleWS)
-	s.mux.Handle("/", http.FileServer(http.FS(web.FS)))
+	sub, _ := fs.Sub(web.FS, "dist")
+	s.mux.Handle("/", http.FileServer(http.FS(sub)))
 }

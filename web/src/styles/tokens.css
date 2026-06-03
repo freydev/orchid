@@ -1,0 +1,41 @@
+/* ============ orchid — calm / light-on-the-eyes aesthetic ============ */
+:root {
+  /* surfaces — soft neutral charcoal, gentle steps */
+  --bg:        #16181d;
+  --term-bg:   #101216;   /* terminal canvas (overridden by JS from accent) */
+  --surface:   #1b1e24;
+  --surface-2: #21252c;
+  --surface-3: #2a2f37;
+  --border:    #2b2f37;
+  --border-2:  #383d47;
+
+  /* text — easy, low-glare neutrals */
+  --text:      #e3e6ea;
+  --text-dim:  #9aa1ac;
+  --text-faint:#646b76;
+
+  /* accent — calm muted purple (overridden live from config) */
+  --accent:      #c98bdb;
+  --accent-dim:  #9c66ad;
+  --accent-bg:   rgba(201,139,219,0.14);
+  --accent-bg-2: rgba(201,139,219,0.22);
+
+  /* semantic status — desaturated */
+  --ok:      #c98bdb;   /* running */
+  --ok-bg:   rgba(201,139,219,0.14);
+  --idle:    #5d6470;   /* idle */
+  --wait:    #e0b765;   /* waiting for input */
+  --wait-bg: rgba(224,183,101,0.13);
+  --danger:  #e58a82;
+
+  /* type — sans for UI, mono only for code/terminal */
+  --sans: "Inter", system-ui, -apple-system, "Segoe UI", sans-serif;
+  --mono: "JetBrains Mono", ui-monospace, "SF Mono", Menlo, monospace;
+
+  /* density */
+  --row-pad: 14px;
+  --gap: 14px;
+  --radius: 10px;
+  --radius-sm: 7px;
+  --statusbar-h: 26px;
+}
