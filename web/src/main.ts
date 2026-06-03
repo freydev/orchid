@@ -1,4 +1,21 @@
 import './app.css';
 import { mount } from 'svelte';
 import App from './App.svelte';
-export default mount(App, { target: document.getElementById('root')! });
+import { app } from './lib/state.svelte';
+import { api } from './lib/api';
+import { applyAccent, applyMonokai, applyRailWidth, DEFAULT_ACCENT } from './lib/theme';
+import { start } from './lib/router';
+
+async function boot() {
+  try { app.settings = await api.settings(); } catch {}
+  try { app.shellName = (await api.shell()).name; } catch {}
+  const accent = app.settings.accent || DEFAULT_ACCENT;
+  if (accent === 'monokai') applyMonokai(); else applyAccent(accent);
+  applyRailWidth(app.settings.rail_width || 230);
+  await start();
+  // live polling stub (real pollStatus added later)
+  setInterval(() => { import('./lib/state.svelte').then(m => m.refresh()); }, 3000);
+}
+const target = document.getElementById('root')!;
+boot().finally(() => mount(App, { target }));
+export {};
