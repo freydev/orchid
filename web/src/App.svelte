@@ -9,8 +9,10 @@
   import NewProject from './components/modals/NewProject.svelte';
   import NewWorktree from './components/modals/NewWorktree.svelte';
   import NewSession from './components/modals/NewSession.svelte';
-  import { modal, confirmState, closeModal } from './lib/modals.svelte';
-  // (global settings modal wiring comes in a later task)
+  import GlobalSettings from './components/modals/GlobalSettings.svelte';
+  import ProjectSettings from './components/modals/ProjectSettings.svelte';
+  import SessionSettings from './components/modals/SessionSettings.svelte';
+  import { modal, confirmState, closeModal, openModal } from './lib/modals.svelte';
 </script>
 
 <div class="app">
@@ -24,7 +26,7 @@
     <div class="spacer"></div>
     <span class="kbd">codex</span>
     <span class="kbd">claude</span>
-    <button class="topbar-gear" title="Settings"><Icon name="gear" size={18} /></button>
+    <button class="topbar-gear" title="Settings" onclick={() => openModal('globalSettings')}><Icon name="gear" size={18} /></button>
   </div>
   <div class="main">
     {#if app.cur.projectId}<ProjectDetail />{:else}<ProjectsPage />{/if}
@@ -38,6 +40,9 @@
   {#if modal.kind === 'newProject'}<NewProject onclose={closeModal} />
   {:else if modal.kind === 'newWorktree'}<NewWorktree onclose={closeModal} />
   {:else if modal.kind === 'newSession'}<NewSession {...modal.props} onclose={closeModal} />
+  {:else if modal.kind === 'globalSettings'}<GlobalSettings onclose={closeModal} />
+  {:else if modal.kind === 'projectSettings'}<ProjectSettings {...modal.props} onclose={closeModal} />
+  {:else if modal.kind === 'sessionSettings'}<SessionSettings {...modal.props} onclose={closeModal} />
   {/if}
 </div>
 
