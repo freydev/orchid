@@ -1,6 +1,9 @@
 <script lang="ts">
   import { app } from '../lib/state.svelte';
+  import { api } from '../lib/api';
   import { openModal } from '../lib/modals.svelte';
+  import { dndzone } from 'svelte-dnd-action';
+  import type { Project } from '../lib/types';
   import ProjectCard from './ProjectCard.svelte';
   import Icon from './ui/Icon.svelte';
 
@@ -8,6 +11,14 @@
   const running = $derived(all.filter((s) => s.status === 'running').length);
   const waiting = $derived(all.filter((s) => s.status === 'requires_action').length);
   const idle = $derived(all.filter((s) => s.status === 'idle' || s.status === 'stopped').length);
+
+  function onConsider(e: CustomEvent<{ items: Project[] }>) {
+    app.projects = e.detail.items;
+  }
+  function onFinalize(e: CustomEvent<{ items: Project[] }>) {
+    app.projects = e.detail.items;
+    api.orderProjects(app.projects.map((p) => p.id));
+  }
 </script>
 
 <div class="wrap page">
@@ -25,7 +36,7 @@
       <button class="btn primary" onclick={() => openModal('newProject')}><Icon name="plus" size={15} /> New project</button>
     </div>
     {#if app.projects.length}
-      <div class="proj-list">
+      <div class="proj-list" use:dndzone={{ items: app.projects, flipDurationMs: 140 }} onconsider={onConsider} onfinalize={onFinalize}>
         {#each app.projects as p (p.id)}<ProjectCard project={p} />{/each}
       </div>
     {:else}

@@ -1,7 +1,9 @@
 <script lang="ts">
   import type { Session } from '../lib/types';
   import { app, MAX_GRID } from '../lib/state.svelte';
+  import { api } from '../lib/api';
   import { agentMeta, statusMeta } from '../lib/util';
+  import { dndzone } from 'svelte-dnd-action';
   import BranchLabel from './ui/BranchLabel.svelte';
   import TermPane from './TermPane.svelte';
 
@@ -41,6 +43,15 @@
       app.cur.grid = [...app.cur.grid, id];
     }
   }
+
+  // dnd over panes (each pane is a Session with a stable id); reorder app.cur.grid
+  function onConsider(e: CustomEvent<{ items: Session[] }>) {
+    app.cur.grid = e.detail.items.map((s) => s.id);
+  }
+  function onFinalize(e: CustomEvent<{ items: Session[] }>) {
+    app.cur.grid = e.detail.items.map((s) => s.id);
+    api.orderGrid(app.cur.grid);
+  }
 </script>
 
 <div class="detail-body">
@@ -73,7 +84,8 @@
       <div>Up to {MAX_GRID} terminals at once.</div>
     </div>
   {:else}
-    <div class="term-grid" class:cols-1={app.cur.grid.length === 1}>
+    <div class="term-grid" class:cols-1={app.cur.grid.length === 1}
+         use:dndzone={{ items: panes, flipDurationMs: 140 }} onconsider={onConsider} onfinalize={onFinalize}>
       {#each panes as s (s.id)}
         <TermPane session={s} />
       {/each}

@@ -1,22 +1,54 @@
 <script lang="ts">
+  import type { Worktree, Session } from '../lib/types';
   import { app } from '../lib/state.svelte';
+  import { api } from '../lib/api';
   import { parseBranch } from '../lib/util';
   import { openModal } from '../lib/modals.svelte';
+  import { dndzone } from 'svelte-dnd-action';
   import Icon from './ui/Icon.svelte';
   import RailItem from './RailItem.svelte';
 
-  // worktrees with their sessions + parsed branch label
-  const groups = $derived(
+  type WtItem = Worktree & { id: string };
+  // worktrees with their sessions + parsed branch label; `id` for the dndzone (keys on path)
+  type Group = { id: string; wt: WtItem; wb: ReturnType<typeof parseBranch>; rows: Session[]; removing: boolean };
+  const groups = $derived<Group[]>(
     app.worktrees.map((wt) => ({
-      wt,
+      id: wt.path,
+      wt: { ...wt, id: wt.path } as WtItem,
       wb: parseBranch(wt.name),
       rows: app.sessions.filter((s) => s.worktree === wt.path),
       removing: app.removingWt.has(wt.path),
     }))
   );
+
+  // --- worktree group reorder ---
+  // map each (possibly shadow) group back to its worktree by path
+  const toWts = (items: Group[]): Worktree[] =>
+    items.map((g) => app.worktrees.find((w) => w.path === g.id) ?? g.wt);
+  function onWtConsider(e: CustomEvent<{ items: Group[] }>) {
+    app.worktrees = toWts(e.detail.items);
+  }
+  function onWtFinalize(e: CustomEvent<{ items: Group[] }>) {
+    app.worktrees = toWts(e.detail.items);
+    if (app.cur.projectId) api.orderWorktrees(app.cur.projectId, app.worktrees.map((w) => w.path));
+  }
+
+  // --- per-worktree session reorder ---
+  function applyOrder(wtPath: string, newRows: Session[]) {
+    let i = 0;
+    app.sessions = app.sessions.map((s) => (s.worktree === wtPath ? newRows[i++] : s));
+  }
+  function sessConsider(wtPath: string, e: CustomEvent<{ items: Session[] }>) {
+    applyOrder(wtPath, e.detail.items);
+  }
+  function sessFinalize(wtPath: string, e: CustomEvent<{ items: Session[] }>) {
+    applyOrder(wtPath, e.detail.items);
+    api.orderSessions(app.sessions.map((s) => s.id));
+  }
 </script>
 
-{#each groups as g (g.wt.path)}
+<div class="rail-groups" use:dndzone={{ items: groups, flipDurationMs: 140, type: 'rail-wt' }} onconsider={onWtConsider} onfinalize={onWtFinalize}>
+{#each groups as g (g.id)}
   <div class="rail-group" class:removing={g.removing} data-wtpath={g.wt.path}>
     {#if g.wb.tag}
       <div class="rail-head" title={g.wt.name}>
@@ -47,17 +79,21 @@
         </div>
       </div>
     {/if}
-    <div class="rail-list">
-      {#if g.rows.length}
+    {#if g.rows.length}
+      <div class="rail-list"
+           use:dndzone={{ items: g.rows, flipDurationMs: 140, type: 'rail-sess' }}
+           onconsider={(e) => sessConsider(g.wt.path, e)}
+           onfinalize={(e) => sessFinalize(g.wt.path, e)}>
         {#each g.rows as s (s.id)}
           <RailItem session={s} active={s.id === app.cur.activeId} />
         {/each}
-      {:else}
-        <div class="rail-empty">no sessions</div>
-      {/if}
-    </div>
+      </div>
+    {:else}
+      <div class="rail-list"><div class="rail-empty">no sessions</div></div>
+    {/if}
   </div>
 {/each}
+</div>
 
 <style>
   .rail-group { margin-bottom: 4px; }

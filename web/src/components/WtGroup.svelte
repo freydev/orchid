@@ -1,7 +1,9 @@
 <script lang="ts">
-  import type { Worktree } from '../lib/types';
+  import type { Worktree, Session } from '../lib/types';
   import { app } from '../lib/state.svelte';
+  import { api } from '../lib/api';
   import { openModal } from '../lib/modals.svelte';
+  import { dndzone } from 'svelte-dnd-action';
   import Icon from './ui/Icon.svelte';
   import BranchLabel from './ui/BranchLabel.svelte';
   import SessionCard from './SessionCard.svelte';
@@ -9,6 +11,22 @@
   let { wt }: { wt: Worktree } = $props();
 
   const rows = $derived(app.sessions.filter((s) => s.worktree === wt.path));
+
+  // Rebuild app.sessions so this group's sessions take `newRows` order in place,
+  // preserving every other worktree's relative order, then persist the full id order.
+  function applyOrder(newRows: Session[]) {
+    let i = 0;
+    app.sessions = app.sessions.map((s) =>
+      s.worktree === wt.path ? newRows[i++] : s
+    );
+  }
+  function onConsider(e: CustomEvent<{ items: Session[] }>) {
+    applyOrder(e.detail.items);
+  }
+  function onFinalize(e: CustomEvent<{ items: Session[] }>) {
+    applyOrder(e.detail.items);
+    api.orderSessions(app.sessions.map((s) => s.id));
+  }
   // default: empty worktrees collapsed, non-empty open; user toggle overrides
   const open = $derived(
     app.cur.collapsed[wt.path] === undefined ? rows.length > 0 : !app.cur.collapsed[wt.path]
@@ -43,7 +61,7 @@
   </div>
   {#if open}
     {#if rows.length}
-      <div class="cards">
+      <div class="cards" use:dndzone={{ items: rows, flipDurationMs: 140, type: 'sess' }} onconsider={onConsider} onfinalize={onFinalize}>
         {#each rows as s (s.id)}
           <SessionCard session={s} />
         {/each}
