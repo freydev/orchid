@@ -31,7 +31,7 @@ type settingsReq struct {
 }
 
 // defaultAccent is the accent color id used when none is configured.
-const defaultAccent = "pink"
+const defaultAccent = "purple"
 
 // effHost / effPort prefer the persisted config, falling back to how the daemon
 // was actually launched.

@@ -63,7 +63,7 @@ const DOT_COLORS = [
   { id: "monokai", hex: "#f92672" },
 ];
 const colorHex = (id) => (DOT_COLORS.find((c) => c.id === id) || {}).hex || null;
-const DEFAULT_ACCENT = "pink";
+const DEFAULT_ACCENT = "purple";
 // apply an accent color id to the live CSS variables (derives dim + bg tints)
 // Re-tint the whole TUI palette toward the accent hue: surfaces, borders and
 // text are gray levels mixed toward the accent (the "phosphor" cast follows the
@@ -81,13 +81,13 @@ function applyMonokai() {
     "--ok": "#a6e22e", "--ok-bg": "rgba(166,226,46,0.14)",
     "--wait": "#e6db74", "--wait-bg": "rgba(230,219,116,0.15)",
     "--idle": "#75715e", "--danger": "#f92672",
-    "--term-bg": "#272822",
+    "--term-bg": "#32332b",
   };
   for (const k in v) root.setProperty(k, v[k]);
-  if (typeof MONOKAI !== "undefined") { MONOKAI.background = "#272822"; MONOKAI.cursorAccent = "#272822"; }
+  if (typeof MONOKAI !== "undefined") { MONOKAI.background = "#32332b"; MONOKAI.cursorAccent = "#32332b"; }
   if (typeof panes !== "undefined") {
     for (const p of panes.values()) {
-      if (p.term) { try { p.term.options.theme = Object.assign({}, p.term.options.theme, { background: "#272822", cursorAccent: "#272822" }); } catch (_) {} }
+      if (p.term) { try { p.term.options.theme = Object.assign({}, p.term.options.theme, { background: "#32332b", cursorAccent: "#32332b" }); } catch (_) {} }
     }
   }
 }
@@ -104,25 +104,24 @@ function applyAccent(id) {
 
   root.setProperty("--accent", hex);
   root.setProperty("--accent-dim", hx([r * 0.72, g * 0.72, b * 0.72]));
-  root.setProperty("--accent-bg", "rgba(" + r + "," + g + "," + b + ",0.12)");
+  root.setProperty("--accent-bg", "rgba(" + r + "," + g + "," + b + ",0.13)");
   root.setProperty("--accent-bg-2", "rgba(" + r + "," + g + "," + b + ",0.20)");
-  // surfaces — near-black with a faint accent cast
-  root.setProperty("--bg", tint(7, 0.05));
-  root.setProperty("--surface", tint(13, 0.06));
-  root.setProperty("--surface-2", tint(20, 0.09));
-  root.setProperty("--surface-3", tint(28, 0.12));
-  root.setProperty("--border", tint(42, 0.18));
-  root.setProperty("--border-2", tint(62, 0.27));
-  // text — accent-tinted phosphor
-  root.setProperty("--text", tint(206, 0.10));
-  root.setProperty("--text-dim", tint(135, 0.18));
-  root.setProperty("--text-faint", tint(82, 0.20));
-  // "running"/ok follows the accent
+  // light/calm theme: cast the neutral surfaces+text gently toward the accent
+  // hue (lighter base levels + low weights keep it soft, not phosphor-heavy).
+  root.setProperty("--bg", tint(24, 0.05));
+  root.setProperty("--surface", tint(31, 0.06));
+  root.setProperty("--surface-2", tint(39, 0.08));
+  root.setProperty("--surface-3", tint(49, 0.11));
+  root.setProperty("--border", tint(49, 0.14));
+  root.setProperty("--border-2", tint(66, 0.20));
+  root.setProperty("--text", tint(230, 0.05));
+  root.setProperty("--text-dim", tint(160, 0.12));
+  root.setProperty("--text-faint", tint(108, 0.16));
   root.setProperty("--ok", hex);
-  root.setProperty("--ok-bg", "rgba(" + r + "," + g + "," + b + ",0.12)");
+  root.setProperty("--ok-bg", "rgba(" + r + "," + g + "," + b + ",0.13)");
 
-  // terminal background: a very dark tint of the accent
-  const t = (c) => Math.round(8 + c * 0.09);
+  // terminal background: a soft dark neutral with a faint accent cast
+  const t = (c) => Math.round(16 + c * 0.05);
   const termbg = hx([t(r), t(g), t(b)]);
   root.setProperty("--term-bg", termbg);
   if (typeof MONOKAI !== "undefined") { MONOKAI.background = termbg; MONOKAI.cursorAccent = termbg; }
@@ -801,12 +800,33 @@ function confirmDialog({ title, body, confirmLabel = "Confirm", danger = true })
 }
 /* ---------- worktree diff viewer ---------- */
 const DSTAT = { modified: "M", added: "A", deleted: "D", renamed: "R" };
+// map a file extension to a highlight.js language (only when registered)
+const DIFF_LANG = {
+  js: "javascript", jsx: "javascript", mjs: "javascript", cjs: "javascript", ts: "typescript", tsx: "typescript",
+  go: "go", py: "python", rb: "ruby", rs: "rust", java: "java", kt: "kotlin", c: "c", h: "c",
+  cpp: "cpp", cc: "cpp", hpp: "cpp", cs: "csharp", php: "php", swift: "swift", dart: "dart", lua: "lua",
+  sh: "bash", bash: "bash", zsh: "bash", fish: "bash", json: "json", yml: "yaml", yaml: "yaml",
+  toml: "ini", ini: "ini", md: "markdown", html: "xml", xml: "xml", css: "css", scss: "scss", sql: "sql", vim: "vim",
+};
+function diffLang(path) {
+  if (typeof hljs === "undefined") return null;
+  const ext = (path.split(".").pop() || "").toLowerCase();
+  const lang = DIFF_LANG[ext];
+  return (lang && hljs.getLanguage(lang)) ? lang : null;
+}
+// highlighted (or escaped) HTML for one diff line
+function dcodeHtml(text, lang) {
+  if (!text) return " ";
+  if (lang) { try { return hljs.highlight(text, { language: lang, ignoreIllegal: true }).value; } catch (_) {} }
+  return esc(text);
+}
 function diffFileHtml(f, collapsed) {
+  const lang = diffLang(f.path);
   const hunks = (f.hunks || []).map((h) =>
     '<div class="dhunk"><div class="dhunk-head mono">' + esc(h.header) + "</div>" +
     h.lines.map((ln) => {
       const g = ln.t === "add" ? "+" : ln.t === "del" ? "−" : " ";
-      return '<div class="dline ' + ln.t + '"><span class="dgutter">' + g + '</span><span class="dcode mono">' + (esc(ln.text) || " ") + "</span></div>";
+      return '<div class="dline ' + ln.t + '"><span class="dgutter">' + g + '</span><span class="dcode mono">' + dcodeHtml(ln.text, lang) + "</span></div>";
     }).join("") + "</div>").join("");
   return '<div class="dfile">' +
     '<div class="dfile-head" data-dtoggle>' +
