@@ -41,6 +41,17 @@ func (s *Server) handleWS(w http.ResponseWriter, r *http.Request) {
 	}
 	defer sess.Detach(att)
 
+	// Tell the client the current pane geometry (text frame) before any bytes,
+	// so a read-only preview can size its terminal to match the real pane and
+	// render redraw-heavy agents (claude/codex) correctly.
+	if cols, rows := sess.Size(); cols > 0 && rows > 0 {
+		if msg, err := json.Marshal(controlMsg{Type: "size", Cols: cols, Rows: rows}); err == nil {
+			wctx, cancel := context.WithTimeout(ctx, 10*time.Second)
+			_ = c.Write(wctx, websocket.MessageText, msg)
+			cancel()
+		}
+	}
+
 	// Replay scrollback first.
 	if replay := sess.Replay(); len(replay) > 0 {
 		wctx, cancel := context.WithTimeout(ctx, 10*time.Second)

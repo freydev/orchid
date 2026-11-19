@@ -10,6 +10,7 @@ import (
 	"strings"
 	"testing"
 
+	"orchid/internal/config"
 	"orchid/internal/project"
 	"orchid/internal/session"
 	"orchid/internal/tmux"
@@ -180,4 +181,197 @@ func statusOf(mgr *session.Manager, id string) string {
 		}
 	}
 	return ""
+}
+
+func TestAPISettingsIdleTimeout(t *testing.T) {
+	srv, _, _ := newTestServer(t)
+	t.Setenv("XDG_CONFIG_HOME", t.TempDir())
+
+	get := func() settingsOut {
+		var out settingsOut
+		resp, err := http.Get(srv.URL + "/api/settings")
+		if err != nil {
+			t.Fatal(err)
+		}
+		defer resp.Body.Close()
+		json.NewDecoder(resp.Body).Decode(&out)
+		return out
+	}
+	put := func(body string) {
+		t.Helper()
+		req, _ := http.NewRequest(http.MethodPut, srv.URL+"/api/settings", strings.NewReader(body))
+		req.Header.Set("Content-Type", "application/json")
+		resp, err := http.DefaultClient.Do(req)
+		if err != nil {
+			t.Fatal(err)
+		}
+		defer resp.Body.Close()
+		if resp.StatusCode != 200 {
+			t.Fatalf("PUT /api/settings = %d", resp.StatusCode)
+		}
+	}
+
+	// an unset config reports the default rather than a bare 0
+	if got := get().IdleTimeoutMin; got != config.DefaultIdleTimeoutMin {
+		t.Fatalf("default idle_timeout_min = %d, want %d", got, config.DefaultIdleTimeoutMin)
+	}
+	put(`{"idle_timeout_min":45}`)
+	if got := get().IdleTimeoutMin; got != 45 {
+		t.Fatalf("after PUT 45, idle_timeout_min = %d", got)
+	}
+	// a client that omits the field must not clobber the stored value
+	put(`{"accent":"blue"}`)
+	if got := get().IdleTimeoutMin; got != 45 {
+		t.Fatalf("omitted field clobbered the value: %d", got)
+	}
+	// negative means "off" and must survive the round trip verbatim
+	put(`{"idle_timeout_min":-1}`)
+	if got := get().IdleTimeoutMin; got != -1 {
+		t.Fatalf("after PUT -1, idle_timeout_min = %d", got)
+	}
+}
+
+func TestAPIGroups(t *testing.T) {
+	srv, mgr, ps := newTestServer(t)
+	repo := gitRepo(t)
+	p, _ := ps.Add("p", repo)
+	base := srv.URL + "/api/projects/" + p.ID
+
+	do := func(method, url, body string) *http.Response {
+		t.Helper()
+		req, _ := http.NewRequest(method, url, bytes.NewBufferString(body))
+		resp, err := http.DefaultClient.Do(req)
+		if err != nil {
+			t.Fatal(err)
+		}
+		return resp
+	}
+	worktrees := func() []map[string]any {
+		resp := do(http.MethodGet, base+"/worktrees", "")
+		defer resp.Body.Close()
+		var out []map[string]any
+		json.NewDecoder(resp.Body).Decode(&out)
+		return out
+	}
+	root := worktrees()[0]["path"].(string)
+
+	if resp := do(http.MethodPost, base+"/groups", `{"worktree":"/nope","name":"x"}`); resp.StatusCode != 400 {
+		t.Fatalf("bad worktree = %d", resp.StatusCode)
+	}
+	if resp := do(http.MethodPost, base+"/groups", `{"worktree":"`+root+`","name":" "}`); resp.StatusCode != 400 {
+		t.Fatalf("empty name = %d", resp.StatusCode)
+	}
+	resp := do(http.MethodPost, base+"/groups", `{"worktree":"`+root+`","name":"Review"}`)
+	var g project.Group
+	json.NewDecoder(resp.Body).Decode(&g)
+	resp.Body.Close()
+	if resp.StatusCode != 200 || g.ID == "" {
+		t.Fatalf("create group = %d %+v", resp.StatusCode, g)
+	}
+	if gs := worktrees()[0]["groups"].([]any); len(gs) != 1 {
+		t.Fatalf("worktree groups = %v", gs)
+	}
+
+	// session created in the group; another moved in via PATCH; a third ungrouped
+	resp = do(http.MethodPost, srv.URL+"/api/sessions", `{"project":"`+p.ID+`","worktree":"`+root+`","agent":"shell","group":"`+g.ID+`"}`)
+	resp.Body.Close()
+	if resp.StatusCode != 200 {
+		t.Fatalf("create in group = %d", resp.StatusCode)
+	}
+	if resp := do(http.MethodPost, srv.URL+"/api/sessions", `{"project":"`+p.ID+`","worktree":"`+root+`","agent":"shell","group":"g-nope"}`); resp.StatusCode != 400 {
+		t.Fatalf("unknown group = %d", resp.StatusCode)
+	}
+	s2, _ := mgr.Create(p.ID, root, "shell", session.CreateOpts{})
+	s3, _ := mgr.Create(p.ID, root, "shell", session.CreateOpts{})
+	if resp := do(http.MethodPatch, srv.URL+"/api/sessions/"+s2.ID, `{"group":"`+g.ID+`"}`); resp.StatusCode != 200 {
+		t.Fatalf("move to group = %d", resp.StatusCode)
+	}
+	if resp := do(http.MethodPatch, srv.URL+"/api/sessions/"+s3.ID, `{"group":"g-nope"}`); resp.StatusCode != 400 {
+		t.Fatalf("move to unknown group = %d", resp.StatusCode)
+	}
+
+	// clear kills only the group's sessions; the group survives
+	resp = do(http.MethodPost, base+"/groups/"+g.ID+"/clear", "")
+	var cleared map[string]int
+	json.NewDecoder(resp.Body).Decode(&cleared)
+	resp.Body.Close()
+	if cleared["killed"] != 2 {
+		t.Fatalf("cleared = %v", cleared)
+	}
+	if l := mgr.List(); len(l) != 1 || l[0].ID != s3.ID {
+		t.Fatalf("sessions after clear = %+v", l)
+	}
+	if gs := worktrees()[0]["groups"].([]any); len(gs) != 1 {
+		t.Fatalf("group dropped by clear: %v", gs)
+	}
+
+	// rename, then delete: sessions survive, ungrouped
+	if resp := do(http.MethodPatch, base+"/groups/"+g.ID, `{"name":"Reviews"}`); resp.StatusCode != 204 {
+		t.Fatalf("rename = %d", resp.StatusCode)
+	}
+	do(http.MethodPatch, srv.URL+"/api/sessions/"+s3.ID, `{"group":"`+g.ID+`"}`).Body.Close()
+	if resp := do(http.MethodDelete, base+"/groups/"+g.ID, ""); resp.StatusCode != 204 {
+		t.Fatalf("delete = %d", resp.StatusCode)
+	}
+	if l := mgr.List(); len(l) != 1 || l[0].Group != "" {
+		t.Fatalf("sessions after delete = %+v", l)
+	}
+	if gs := worktrees()[0]["groups"].([]any); len(gs) != 0 {
+		t.Fatalf("group not deleted: %v", gs)
+	}
+}
+
+func TestAPIPruneEmptyWorktrees(t *testing.T) {
+	srv, mgr, ps := newTestServer(t)
+	repo := gitRepo(t)
+	p, _ := ps.Add("p", repo)
+	base := srv.URL + "/api/projects/" + p.ID + "/worktrees"
+
+	add := func(branch string) string {
+		resp, _ := http.Post(base, "application/json", bytes.NewBufferString(`{"branch":"`+branch+`"}`))
+		if resp.StatusCode != 200 {
+			t.Fatalf("add wt %s = %d", branch, resp.StatusCode)
+		}
+		var wt map[string]any
+		json.NewDecoder(resp.Body).Decode(&wt)
+		resp.Body.Close()
+		return wt["path"].(string)
+	}
+	empty, withSess, dirty := add("feat/empty"), add("feat/sess"), add("feat/dirty")
+	if _, err := mgr.Create(p.ID, withSess, "shell", session.CreateOpts{}); err != nil {
+		t.Fatalf("create session: %v", err)
+	}
+	if out, err := exec.Command("touch", filepath.Join(dirty, "wip.txt")).CombinedOutput(); err != nil {
+		t.Fatalf("touch: %v %s", err, out)
+	}
+
+	resp, _ := http.Get(base + "/empty")
+	var got []map[string]any
+	json.NewDecoder(resp.Body).Decode(&got)
+	resp.Body.Close()
+	if len(got) != 1 || got[0]["path"] != empty || got[0]["branch"] != "feat/empty" {
+		t.Fatalf("empty = %v, want only %s", got, empty)
+	}
+
+	// prune re-verifies every path: only the empty one goes
+	body, _ := json.Marshal(map[string]any{"paths": []string{empty, withSess, dirty, repo}})
+	resp, _ = http.Post(base+"/prune", "application/json", bytes.NewReader(body))
+	var res struct {
+		Removed []string `json:"removed"`
+	}
+	json.NewDecoder(resp.Body).Decode(&res)
+	resp.Body.Close()
+	if len(res.Removed) != 1 || res.Removed[0] != empty {
+		t.Fatalf("removed = %v, want [%s]", res.Removed, empty)
+	}
+	if out, _ := exec.Command("git", "-C", repo, "branch", "--list", "feat/empty").Output(); strings.TrimSpace(string(out)) != "" {
+		t.Fatalf("branch feat/empty not deleted")
+	}
+	resp, _ = http.Get(base)
+	var wts []map[string]any
+	json.NewDecoder(resp.Body).Decode(&wts)
+	resp.Body.Close()
+	if len(wts) != 3 {
+		t.Fatalf("worktrees after prune = %d, want 3 (root, sess, dirty)", len(wts))
+	}
 }

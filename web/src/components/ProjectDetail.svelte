@@ -2,31 +2,21 @@
   import type { Project } from '../lib/types';
   import { app } from '../lib/state.svelte';
   import DetailBar from './DetailBar.svelte';
-  import Board from './Board.svelte';
-  import Grid from './Grid.svelte';
   import Terminal from './Terminal.svelte';
 
   const project = $derived<Project>(
     app.projects.find((p) => p.id === app.cur.projectId) ??
       ({ name: '', path: '' } as Project)
   );
-  const focus = $derived(app.cur.view === 'terminal');
 </script>
 
-<div class="wrap" class:focus-mode={focus}>
+<div class="wrap focus-mode">
   <DetailBar {project} />
-  {#if app.cur.view === 'list'}
-    <Board />
-  {:else if app.cur.view === 'grid'}
-    <Grid />
-  {:else}
-    <Terminal />
-  {/if}
+  <Terminal />
 </div>
 
 <style>
   .wrap { max-width: none; margin: 0; padding: 0; display: flex; flex-direction: column; min-height: 100%; }
-  .detail-body { padding: 20px 24px 48px; }
   .wrap.focus-mode { height: calc(100vh - 52px - var(--statusbar-h)); overflow: hidden; }
   .wrap.focus-mode :global(.focus-term) { border-radius: var(--radius-sm); border: none; background: var(--term-bg); }
   .wrap.focus-mode :global(.focus-rail) { border-radius: var(--radius-sm); border: none; border-right: 1px solid var(--border); background: var(--surface); padding: 8px 8px 8px 10px; }

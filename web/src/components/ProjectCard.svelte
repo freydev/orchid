@@ -3,8 +3,10 @@
   import { app, refresh } from '../lib/state.svelte';
   import { setHash } from '../lib/router';
   import { colorHex } from '../lib/theme';
-  import { agentMeta, statusMeta, parseBranch, STATUS_RANK } from '../lib/util';
-  import { openModal } from '../lib/modals.svelte';
+  import { agentMeta, statusMeta, parseBranch, STATUS_RANK, escHtml } from '../lib/util';
+  import { openModal, confirm } from '../lib/modals.svelte';
+  import { api } from '../lib/api';
+  import { toast } from '../lib/toast.svelte';
   import Icon from './ui/Icon.svelte';
   import Badge from './ui/Badge.svelte';
   import BranchLabel from './ui/BranchLabel.svelte';
@@ -27,7 +29,7 @@
   }
 
   function openProject() {
-    app.cur = { projectId: project.id, view: 'list', activeId: null, grid: [], collapsed: {} };
+    app.cur = { projectId: project.id, activeId: null, collapsed: {} };
     setHash();
     refresh();
   }
@@ -43,9 +45,25 @@
     openModal('projectSettings', { project });
   }
 
-  function onDelete(e: MouseEvent) {
+  async function onDelete(e: MouseEvent) {
     e.stopPropagation();
-    openModal('confirmDeleteProject', { project });
+    const ok = await confirm({
+      title: 'Delete project',
+      body: `Remove <b>${escHtml(project.name)}</b> from Orchid? Git worktrees and files on disk are left untouched.`,
+      confirmLabel: 'Delete',
+    });
+    if (!ok) return;
+    try {
+      await api.removeProject(project.id);
+      if (app.cur.projectId === project.id) {
+        app.cur = { projectId: null, activeId: null, collapsed: {} };
+        setHash();
+      }
+      await refresh();
+      toast('Project removed', 'ok');
+    } catch (err) {
+      toast('Delete failed: ' + (err as Error).message, 'error');
+    }
   }
 </script>
 
@@ -66,6 +84,9 @@
         {project.name}
         {#if (project.branch || '').trim()}
           <span class="pc-branch" title="current branch"><Icon name="branch" size={12} /><BranchLabel name={project.branch ?? ''} /></span>
+        {/if}
+        {#if project.problem}
+          <span class="pc-problem" title="Project path problem: {project.problem}"><Icon name="warn" size={12} /> {project.problem}</span>
         {/if}
       </div>
       <div class="pc-path">{project.path}</div>
@@ -93,6 +114,14 @@
       {/each}
       {#if more > 0}<div class="pc-more">+{more} more</div>{/if}
     </div>
+    <!-- mobile: just the status dots in a row, no session info -->
+    <div class="pc-statuses">
+      <span class="pc-statuses-label">{list.length} {list.length === 1 ? 'session' : 'sessions'}</span>
+      {#each sorted as c}
+        {@const st = statusMeta(c.status)}
+        <span class="dot {st.cls}" class:pulse={st.pulse} title={chipName(c)}></span>
+      {/each}
+    </div>
   {:else}
     <div class="pc-empty">No sessions yet — open to start an agent or shell</div>
   {/if}
@@ -115,6 +144,8 @@
   .pc-chip .cname { font-size: 12.5px; font-weight: 500; white-space: nowrap; }
   .pc-chip .cwt { font-size: 11px; color: var(--text-faint); border-left: 1px solid var(--border-2); margin-left: 1px; padding-left: 8px; white-space: nowrap; }
   .pc-more { display: flex; align-items: center; font-size: 12px; color: var(--text-faint); padding: 0 4px; }
+  .pc-statuses { display: none; } /* mobile-only status-dot row */
+  .pc-statuses-label { font-size: 11px; font-weight: 600; color: var(--text-faint); letter-spacing: 0.02em; margin-right: 4px; }
   .pc-empty { padding: 0 18px 16px; font-size: 12.5px; color: var(--text-faint); }
   .proj-card .proj-del { opacity: 0; transition: opacity .12s; }
   .proj-card .proj-del.btn.sm.icon { width: 36px; height: 36px; }
@@ -132,13 +163,18 @@
   .dot.idle { background: var(--idle); }
   .dot.stopped { background: #3a3a42; }
   .dot.wait { background: var(--wait); }
-  .dot.pulse { animation: pulse 1.3s ease-in-out infinite; }
+  /* composited-only (transform/opacity): box-shadow pulse repainted every frame */
+  .dot.pulse { position: relative; animation: pulse 1.3s ease-in-out infinite; }
   .dot.ok.pulse { color: var(--ok); }
   .dot.wait.pulse { color: var(--wait); }
-  @keyframes pulse {
-    0%   { box-shadow: 0 0 0 0 color-mix(in srgb, currentColor 65%, transparent); transform: scale(1); }
-    50%  { box-shadow: 0 0 0 5px color-mix(in srgb, currentColor 10%, transparent); transform: scale(1.35); }
-    100% { box-shadow: 0 0 0 8px transparent; transform: scale(1); }
+  .dot.pulse::after {
+    content: ''; position: absolute; inset: 0; border-radius: 50%;
+    background: currentColor; animation: pulse-ring 1.3s ease-out infinite;
+  }
+  @keyframes pulse { 50% { transform: scale(1.35); } }
+  @keyframes pulse-ring {
+    0%   { transform: scale(1); opacity: .65; }
+    100% { transform: scale(3); opacity: 0; }
   }
 
   /* project color marker + per-card gear */
@@ -147,6 +183,8 @@
   .pc-name { display: flex; align-items: center; gap: 9px; flex-wrap: wrap; }
   .pc-branch { display: inline-flex; align-items: center; gap: 4px; font-size: 11.5px; color: var(--text-dim); font-weight: 500; background: var(--surface-2); border: 1px solid var(--border-2); border-radius: var(--radius-sm); padding: 1px 7px 1px 5px; white-space: nowrap; flex-shrink: 0; }
   .pc-branch > :global(svg) { color: var(--text-faint); flex-shrink: 0; }
+  .pc-problem { display: inline-flex; align-items: center; gap: 4px; font-size: 11px; font-weight: 600; color: var(--danger); background: color-mix(in srgb, var(--danger) 12%, transparent); border: 1px solid color-mix(in srgb, var(--danger) 38%, transparent); border-radius: var(--radius-sm); padding: 1px 7px 1px 5px; white-space: nowrap; flex-shrink: 0; }
+  .pc-problem > :global(svg) { color: var(--danger); flex-shrink: 0; }
   .pc-gear { display: inline-flex; color: var(--text-faint); opacity: 0; transition: opacity .12s, color .12s; }
   .proj-card:hover .pc-gear { opacity: 1; }
   .pc-gear:hover { color: var(--text); }
@@ -161,4 +199,12 @@
   .proj-card[style*="--pcol"]:hover { background: linear-gradient(90deg, color-mix(in srgb, var(--pcol) 14%, transparent), transparent 240px), var(--surface-2); }
   .proj-card[style*="--pcol"] .pc-dot { background: var(--pcol); }
   .proj-card[style*="--pcol"]::before { background: var(--pcol); }
+
+  @media (max-width: 640px) {
+    .pc-head { gap: 10px; padding: 13px 13px 11px; }
+    .pc-meta { gap: 11px; }
+    .pc-meta .stat { display: none; }
+    .pc-sessions { display: none; }            /* hide session info chips */
+    .pc-statuses { display: flex; flex-wrap: wrap; align-items: center; gap: 8px; margin: 0 13px; padding: 11px 0 13px; border-top: 1px solid var(--border); }
+  }
 </style>

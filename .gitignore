@@ -13,3 +13,7 @@ node_modules/
 !.beads/config.yaml
 !.beads/metadata.json
 !.beads/identity.toml
+
+# OS / local tooling
+.DS_Store
+.gc/

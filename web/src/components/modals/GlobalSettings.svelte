@@ -26,6 +26,9 @@
   let accent = $state(app.settings.accent || DEFAULT_ACCENT);
   let shell = $state(shellName(app.settings.shell) || globalShell());
   let port = $state(app.settings.port ? String(app.settings.port) : '');
+  let baseUrl = $state(app.settings.base_url || '');
+  // idle reaper: minutes of silence before a session is stopped; '' / 0 -> off.
+  let idleTimeout = $state(app.settings.idle_timeout_min > 0 ? String(app.settings.idle_timeout_min) : '');
 
   const shellList = shellOptions(shell);
 
@@ -33,7 +36,14 @@
   // settings + shell name into the store. Used by both Save and Restart.
   async function persist(): Promise<{ ok: boolean; restart_needed: boolean } | null> {
     try {
-      const j = await api.putSettings({ shell, accent, port: parseInt(port.trim(), 10) || 0 });
+      const mins = parseInt(idleTimeout.trim(), 10);
+      const j = await api.putSettings({
+        shell, accent,
+        port: parseInt(port.trim(), 10) || 0,
+        base_url: baseUrl.trim(),
+        // an empty or non-positive value disables reaping (-1), never "use the default"
+        idle_timeout_min: mins > 0 ? mins : -1,
+      });
       app.settings = await api.settings();
       app.shellName = (await api.shell()).name;
       return j;
@@ -56,7 +66,7 @@
     if (!j) return;
     const ok = await confirm({
       title: 'Restart server?',
-      body: 'The orchid daemon will restart' + (j.restart_needed ? ' on the new port' : '') +
+      body: 'The Orchid daemon will restart' + (j.restart_needed ? ' on the new port' : '') +
         ". Running sessions are kept (tmux); reload the page once it's back.",
       confirmLabel: 'Restart',
       danger: false,
@@ -91,11 +101,21 @@
     <label>Server port<span class="fhint">restart to apply</span></label>
     <div class="port-row">
       <input class="text mono" bind:value={port} placeholder="8081" />
-      <button class="btn icon" title="Restart the orchid daemon" onclick={restart}><Icon name="restart" size={17} /></button>
+      <button class="btn icon" title="Restart the Orchid daemon" onclick={restart}><Icon name="restart" size={17} /></button>
     </div>
   </div>
 
   <div class="set-soon mono">listening on {app.settings.addr || '?'}</div>
+
+  <div class="field">
+    <label>Notification URL<span class="fhint">origin for notification click — set to your PWA/tailscale URL</span></label>
+    <input class="text mono" bind:value={baseUrl} placeholder="https://macbook-pro.tail548f81.ts.net" />
+  </div>
+
+  <div class="field">
+    <label>Idle timeout<span class="fhint">minutes of silence before a session is stopped — empty = never (each live session holds an agent + its MCP servers in memory)</span></label>
+    <input class="text mono" bind:value={idleTimeout} placeholder="120" />
+  </div>
 
   {#snippet footer()}
     <button class="btn ghost" onclick={onclose}>Cancel</button>

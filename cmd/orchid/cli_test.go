@@ -5,6 +5,8 @@ import (
 	"net/http"
 	"net/http/httptest"
 	"testing"
+
+	"orchid/internal/session"
 )
 
 func TestRouteKnownCommands(t *testing.T) {
@@ -60,5 +62,23 @@ func TestSignalCmdNoEnvIsNoop(t *testing.T) {
 	t.Setenv("ORCHID_URL", "")
 	if code := signalCmd([]string{"running"}); code != 0 {
 		t.Fatalf("expected exit 0 with no env, got %d", code)
+	}
+}
+
+func TestAnyAgentRunning(t *testing.T) {
+	cases := []struct {
+		name string
+		list []session.Info
+		want bool
+	}{
+		{"empty", nil, false},
+		{"agent running", []session.Info{{Agent: "claude", Status: "running"}}, true},
+		{"agent idle", []session.Info{{Agent: "codex", Status: "idle"}, {Agent: "claude", Status: "requires_action"}}, false},
+		{"only shell running", []session.Info{{Agent: "shell", Status: "running"}}, false},
+	}
+	for _, c := range cases {
+		if got := anyAgentRunning(c.list); got != c.want {
+			t.Errorf("%s: got %v want %v", c.name, got, c.want)
+		}
 	}
 }

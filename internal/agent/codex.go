@@ -54,11 +54,21 @@ func tomlEscape(s string) string {
 	return string(b)
 }
 
-func (codexAgent) NewCommand(cwd, agentSessionID string) []string {
-	return append([]string{"codex"}, codexFlags()...)
+// codexBase builds `codex` + global flags (config overrides + optional
+// --dangerously-bypass-approvals-and-sandbox). Global flags must precede any
+// subcommand (e.g. `resume`).
+func codexBase(opts Options) []string {
+	base := append([]string{"codex"}, codexFlags()...)
+	if opts.SkipPermissions {
+		base = append(base, "--dangerously-bypass-approvals-and-sandbox")
+	}
+	return base
 }
 
-func (codexAgent) ResumeCommand(cwd, agentSessionID string) []string {
-	// `-c` is a global option and must precede the subcommand.
-	return append(append([]string{"codex"}, codexFlags()...), "resume", "--last")
+func (codexAgent) NewCommand(cwd, agentSessionID string, opts Options) []string {
+	return codexBase(opts)
+}
+
+func (codexAgent) ResumeCommand(cwd, agentSessionID string, opts Options) []string {
+	return append(codexBase(opts), "resume", "--last")
 }

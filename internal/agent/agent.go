@@ -5,6 +5,14 @@ import (
 	"sort"
 )
 
+// Options carries per-session launch toggles chosen by the user.
+type Options struct {
+	// SkipPermissions launches the agent with its "dangerously skip
+	// permissions" flag (claude: --dangerously-skip-permissions; codex:
+	// --dangerously-bypass-approvals-and-sandbox). Ignored by shell.
+	SkipPermissions bool
+}
+
 // Agent describes how to launch a coding agent inside a tmux session.
 type Agent interface {
 	Name() string
@@ -12,10 +20,10 @@ type Agent interface {
 	// caller-supplied agent session id (so it can be resumed later). Agents
 	// without a session concept ignore the id. cwd is informational; the
 	// working directory is actually set by tmux's -c flag.
-	NewCommand(cwd, agentSessionID string) []string
+	NewCommand(cwd, agentSessionID string, opts Options) []string
 	// ResumeCommand returns argv to resume a prior session, or nil if the agent
 	// has no resume capability (caller then starts fresh).
-	ResumeCommand(cwd, agentSessionID string) []string
+	ResumeCommand(cwd, agentSessionID string, opts Options) []string
 }
 
 var registry = map[string]Agent{

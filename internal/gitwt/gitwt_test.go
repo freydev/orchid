@@ -137,3 +137,93 @@ func TestAddListRemove(t *testing.T) {
 		t.Fatalf("after remove List = %v", wts)
 	}
 }
+
+func TestMarkRootLinkedWorktree(t *testing.T) {
+	wts := []Worktree{
+		{Path: "/repo", Branch: "master", IsMain: true, Primary: true},
+		{Path: "/repo-svelte", Branch: "svelte"},
+		{Path: "/repo/.orchid/worktrees/feat-x", Branch: "feat/x"},
+	}
+	got := markRoot(wts, "/repo-svelte")
+	if got[0].Path != "/repo-svelte" || !got[0].IsMain || got[0].Primary {
+		t.Fatalf("root = %+v", got[0])
+	}
+	if got[1].Path != "/repo" || got[1].IsMain || !got[1].Primary {
+		t.Fatalf("primary = %+v", got[1])
+	}
+	if len(got) != 3 || got[2].IsMain {
+		t.Fatalf("got %+v", got)
+	}
+	// project at the primary: unchanged
+	same := markRoot([]Worktree{{Path: "/repo", IsMain: true, Primary: true}, {Path: "/b"}}, "/repo")
+	if !same[0].IsMain || same[1].IsMain {
+		t.Fatalf("unchanged case = %+v", same)
+	}
+}
+
+func TestHasWork(t *testing.T) {
+	repo := gitRepo(t)
+	base := strings.TrimSpace(git(t, repo, "rev-parse", "--abbrev-ref", "HEAD"))
+	wt, err := Add(repo, "feat/empty", "", false)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if HasWork(repo, wt, "feat/empty", base) {
+		t.Fatal("fresh worktree reported as having work")
+	}
+	// untracked file counts as work
+	if err := os.WriteFile(filepath.Join(wt, "new.txt"), []byte("x"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if !HasWork(repo, wt, "feat/empty", base) {
+		t.Fatal("untracked file not detected")
+	}
+	// committed but not on base counts as work
+	git(t, wt, "add", ".")
+	git(t, wt, "-c", "user.email=t@t", "-c", "user.name=t", "commit", "-q", "-m", "c")
+	if !HasWork(repo, wt, "feat/empty", base) {
+		t.Fatal("commit ahead of base not detected")
+	}
+	// once base contains the commit, nothing is lost
+	git(t, repo, "merge", "-q", "--ff-only", "feat/empty")
+	if HasWork(repo, wt, "feat/empty", base) {
+		t.Fatal("merged branch still reported as having work")
+	}
+	// detached HEAD: be safe
+	if !HasWork(repo, wt, "", base) {
+		t.Fatal("empty branch must count as work")
+	}
+	// a pushed commit lives on a remote ref -> not work, even if base lacks it
+	git(t, wt, "-c", "user.email=t@t", "-c", "user.name=t", "commit", "--allow-empty", "-q", "-m", "c2")
+	if !HasWork(repo, wt, "feat/empty", "no-such-branch") {
+		t.Fatal("unpushed commit with unresolvable base not detected")
+	}
+	remote := t.TempDir()
+	git(t, remote, "init", "-q", "--bare")
+	git(t, repo, "remote", "add", "origin", remote)
+	git(t, repo, "push", "-q", "origin", "feat/empty")
+	if HasWork(repo, wt, "feat/empty", base) {
+		t.Fatal("pushed branch still reported as having work")
+	}
+}
+
+func TestHasWorkMissingDirAndRemove(t *testing.T) {
+	repo := gitRepo(t)
+	base := strings.TrimSpace(git(t, repo, "rev-parse", "--abbrev-ref", "HEAD"))
+	wt, err := Add(repo, "feat/gone", "", false)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := os.RemoveAll(wt); err != nil {
+		t.Fatal(err)
+	}
+	if HasWork(repo, wt, "feat/gone", base) {
+		t.Fatal("worktree with deleted dir and no unique commits reported as work")
+	}
+	if err := Remove(repo, wt); err != nil {
+		t.Fatalf("Remove missing: %v", err)
+	}
+	if strings.Contains(git(t, repo, "worktree", "list"), "feat/gone") {
+		t.Fatal("stale worktree entry not pruned")
+	}
+}

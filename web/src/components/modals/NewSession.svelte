@@ -10,7 +10,7 @@
   import { setHash } from '../../lib/router';
   import type { ClaudeSession } from '../../lib/types';
 
-  let { wt, onclose }: { wt?: string; onclose: () => void } = $props();
+  let { wt, group: groupProp = '', onclose }: { wt?: string; group?: string; onclose: () => void } = $props();
 
   const globalShell = () => app.shellName || (app.settings.shells && app.settings.shells[0]) || 'bash';
   function shellOptions(value: string): string[] {
@@ -36,10 +36,16 @@
   let name = $state('');
   let namePlaceholder = $state('router + sessions API');
   let worktree = $state(wtOpts.some((w) => w.path === wt) ? wt! : (wtOpts[0]?.path ?? ''));
+  // group within the chosen worktree; reset when the worktree changes
+  let group = $state(groupProp);
+  const wtGroups = $derived(app.worktrees.find((w) => w.path === worktree)?.groups ?? []);
+  $effect(() => { if (group && !wtGroups.some((g) => g.id === group)) group = ''; });
   let type = $state<'claude' | 'codex' | 'shell'>('claude');
   let color = $state('');
   let shell = $state(defShell);
   let cmdId = $state('');
+  // dangerously skip permissions — on by default for agent (claude/codex) sessions
+  let dangerous = $state(true);
 
   const shellList = shellOptions(shell);
 
@@ -68,9 +74,10 @@
     type = t;
   }
 
-  function pickResume() {
-    const s = resumeSessions.find((x) => x.id === resumeId);
-    if (resumeId && s && s.title && !name.trim()) name = s.title;
+  function pickResume(e: Event) {
+    const id = (e.currentTarget as HTMLSelectElement).value;
+    const s = resumeSessions.find((x) => x.id === id);
+    if (id && s && s.title && !name.trim()) name = s.title;
   }
 
   function pickPreset(id: string) {
@@ -82,15 +89,20 @@
   async function create() {
     const chosen = type === 'shell' ? presets.find((p: any) => p.id === cmdId) : null;
     const finalName = name.trim() || (chosen ? chosen.label : '');
-    const body: any = { project: app.cur.projectId, worktree, agent: type, name: finalName, color };
+    const body: any = { project: app.cur.projectId, worktree, agent: type, name: finalName, color, group };
     if (type === 'shell') { body.shell = shell; if (chosen) body.command = chosen.cmd; }
-    if (type === 'claude' && resumeId) body.resume_id = resumeId;
+    else body.dangerous = dangerous;
+    if (type === 'claude' && resumeId) {
+      body.resume_id = resumeId;
+      // resume in the conversation's original dir (may be a worktree subfolder)
+      const rs = resumeSessions.find((x) => x.id === resumeId);
+      if (rs && rs.cwd && rs.cwd !== worktree) body.cwd = rs.cwd;
+    }
     try {
       const s = await api.createSession(body);
       onclose();
       await refresh();
       // open the Terminal for the new session
-      app.cur.view = 'terminal';
       app.cur.activeId = s.id;
       setHash();
     } catch (err) {
@@ -110,6 +122,15 @@
       {#each wtOpts as w}<option value={w.path}>{w.name}</option>{/each}
     </select>
   </div>
+  {#if wtGroups.length}
+    <div class="field">
+      <label>Group</label>
+      <select class="text" bind:value={group}>
+        <option value="">No group</option>
+        {#each wtGroups as g}<option value={g.id}>{g.name}</option>{/each}
+      </select>
+    </div>
+  {/if}
   <div class="field">
     <label>Type</label>
     <div class="choice-grid">
@@ -127,13 +148,23 @@
     <Swatches value={color} allowNone={true} noneLabel="Agent default" onpick={(c) => (color = c)} />
   </div>
 
+  {#if type !== 'shell'}
+    <div class="field">
+      <label class="checkrow">
+        <input type="checkbox" bind:checked={dangerous} />
+        <span>Dangerously skip permissions<span class="fhint">{type === 'codex' ? 'codex --dangerously-bypass-approvals-and-sandbox' : 'claude --dangerously-skip-permissions'}</span></span>
+      </label>
+    </div>
+  {/if}
+
   {#if type === 'claude'}
     <div class="field claude-field">
-      <label>Resume Claude session<span class="fhint">import an existing conversation</span></label>
+      <label>Resume Claude session<span class="fhint">import an existing conversation — incl. project subfolders</span></label>
       <select class="text" bind:value={resumeId} onchange={pickResume}>
         <option value="">Start new conversation</option>
         {#each resumeSessions as s}
-          <option value={s.id}>{(s.title || ('session ' + s.id.slice(0, 8))) + ' · ' + relTime(s.updated)}</option>
+          {@const sub = s.cwd && s.cwd !== worktree ? s.cwd.slice(worktree.length).replace(/^\//, '') : ''}
+          <option value={s.id}>{(s.title || ('session ' + s.id.slice(0, 8))) + (sub ? ' [' + sub + ']' : '') + ' · ' + relTime(s.updated)}</option>
         {/each}
       </select>
     </div>

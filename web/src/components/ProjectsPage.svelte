@@ -67,4 +67,11 @@
   .dot.ok { background: var(--ok); }
   .dot.idle { background: var(--idle); }
   .dot.wait { background: var(--wait); }
+
+  @media (max-width: 640px) {
+    .proj-page { padding: 18px 12px 80px; }
+    .page-head { margin-bottom: 16px; flex-wrap: wrap; gap: 12px; }
+    .page-head .btn.primary { width: 100%; justify-content: center; }
+    .sub { flex-wrap: wrap; gap: 10px 14px; }
+  }
 </style>

@@ -3,7 +3,10 @@ package gitwt
 
 import (
 	"bytes"
+	"errors"
 	"fmt"
+	"io/fs"
+	"os"
 	"os/exec"
 	"path/filepath"
 	"strings"
@@ -13,7 +16,12 @@ import (
 type Worktree struct {
 	Path   string `json:"path"`
 	Branch string `json:"branch"`
-	IsMain bool   `json:"is_main"`
+	// IsMain marks the project's own folder (shown as "root"). When the project
+	// path is itself a linked worktree, that is not git's primary worktree.
+	IsMain bool `json:"is_main"`
+	// Primary marks git's primary worktree (first listed). git refuses to
+	// remove it, so it is never removable even when it isn't the project root.
+	Primary bool `json:"-"`
 }
 
 // Available reports whether git is usable.
@@ -24,13 +32,44 @@ func Available() error {
 	return nil
 }
 
-// List returns the worktrees of repo (first entry = main).
+// List returns the worktrees of repo, the repo folder itself first (IsMain).
+// repo may be a linked worktree: then git's primary worktree is listed too,
+// but the root is repo, so sessions created in "root" land in repo.
 func List(repo string) ([]Worktree, error) {
 	out, err := exec.Command("git", "-C", repo, "worktree", "list", "--porcelain").CombinedOutput()
 	if err != nil {
 		return nil, fmt.Errorf("git worktree list: %w: %s", err, out)
 	}
-	return parseList(out), nil
+	return markRoot(parseList(out), repo), nil
+}
+
+// markRoot moves IsMain to the entry whose path is repo (comparing resolved
+// paths: git prints symlink-free paths, e.g. /private/var vs /var) and puts it
+// first. With no match the git order and primary-as-main are kept.
+func markRoot(wts []Worktree, repo string) []Worktree {
+	want := canon(repo)
+	for i := range wts {
+		if canon(wts[i].Path) != want {
+			continue
+		}
+		if i == 0 {
+			return wts
+		}
+		for j := range wts {
+			wts[j].IsMain = j == i
+		}
+		root := wts[i]
+		out := append([]Worktree{root}, wts[:i]...)
+		return append(out, wts[i+1:]...)
+	}
+	return wts
+}
+
+func canon(p string) string {
+	if r, err := filepath.EvalSymlinks(p); err == nil {
+		return filepath.Clean(r)
+	}
+	return filepath.Clean(p)
 }
 
 // parseList parses `git worktree list --porcelain` output. Blocks are separated
@@ -41,6 +80,7 @@ func parseList(out []byte) []Worktree {
 	flush := func() {
 		if cur != nil && cur.Path != "" {
 			cur.IsMain = len(wts) == 0
+			cur.Primary = cur.IsMain
 			wts = append(wts, *cur)
 		}
 		cur = nil
@@ -208,8 +248,16 @@ func Add(repo, branch, base string, fetch bool) (string, error) {
 	return path, nil
 }
 
-// Remove force-removes a worktree (the directory is deleted).
+// Remove force-removes a worktree (the directory is deleted). A worktree whose
+// directory is already gone is unregistered via `git worktree prune`.
 func Remove(repo, path string) error {
+	if missing(path) {
+		out, err := exec.Command("git", "-C", repo, "worktree", "prune").CombinedOutput()
+		if err != nil {
+			return fmt.Errorf("git worktree prune: %w: %s", err, out)
+		}
+		return nil
+	}
 	out, err := exec.Command("git", "-C", repo, "worktree", "remove", "--force", path).CombinedOutput()
 	if err != nil {
 		return fmt.Errorf("git worktree remove: %w: %s", err, out)
@@ -224,4 +272,36 @@ func DeleteBranch(repo, branch string) error {
 		return fmt.Errorf("git branch -D: %w: %s", err, out)
 	}
 	return nil
+}
+
+// HasWork reports whether removing worktree path (on branch) could lose
+// anything: uncommitted or untracked changes, or commits on branch that exist
+// nowhere else — not on any remote-tracking ref and not in base (when base
+// resolves; "" skips it). Pushed or merged work is therefore not "work".
+// Anything it cannot verify (detached HEAD, git errors) counts as work, so
+// callers err on the side of keeping.
+func HasWork(repo, path, branch, base string) bool {
+	branch = strings.TrimSpace(branch)
+	if branch == "" {
+		return true
+	}
+	// a worktree whose directory is gone has no local changes left to lose
+	if !missing(path) {
+		out, err := exec.Command("git", "-C", path, "status", "--porcelain").Output()
+		if err != nil || len(bytes.TrimSpace(out)) > 0 {
+			return true
+		}
+	}
+	args := []string{"-C", repo, "rev-list", "--count", "refs/heads/" + branch, "--not", "--remotes"}
+	base = strings.TrimSpace(base)
+	if base != "" && exec.Command("git", "-C", repo, "rev-parse", "--verify", "--quiet", base+"^{commit}").Run() == nil {
+		args = append(args, base)
+	}
+	out, err := exec.Command("git", args...).Output()
+	return err != nil || strings.TrimSpace(string(out)) != "0"
+}
+
+func missing(path string) bool {
+	_, err := os.Stat(path)
+	return errors.Is(err, fs.ErrNotExist)
 }

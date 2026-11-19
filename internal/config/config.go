@@ -8,6 +8,7 @@ import (
 	"os"
 	"path/filepath"
 	"strings"
+	"time"
 )
 
 // Config is orchid's user configuration.
@@ -24,7 +25,21 @@ type Config struct {
 	Accent string `json:"accent,omitempty"`
 	// RailWidth is the Terminal tab sidebar width in px. Zero -> UI default.
 	RailWidth int `json:"rail_width,omitempty"`
+	// BaseURL is the external origin used to build desktop-notification deep
+	// links (e.g. "https://host.tailnet.ts.net"). Empty -> http://host:port.
+	// Set it to the origin you open the dashboard / installed PWA from, so a
+	// notification click lands on the same origin (and can route into the PWA).
+	BaseURL string `json:"base_url,omitempty"`
+	// IdleTimeoutMin is how many minutes a session may sit idle (no pane
+	// output, not waiting on the user) before the daemon stops it, releasing
+	// its agent and MCP processes. A stopped session keeps its record and can
+	// be restarted. Zero -> DefaultIdleTimeoutMin; negative disables reaping.
+	IdleTimeoutMin int `json:"idle_timeout_min,omitempty"`
 }
+
+// DefaultIdleTimeoutMin is the idle-session timeout applied when the config
+// leaves IdleTimeoutMin unset.
+const DefaultIdleTimeoutMin = 120
 
 // DefaultPath returns the config file path: ~/.config/orchid/config.json
 // (or $XDG_CONFIG_HOME/orchid/config.json when set).
@@ -59,6 +74,19 @@ func Load() Config {
 // Shell returns the configured shell, trimmed, or "" when unset.
 func Shell() string {
 	return strings.TrimSpace(Load().Shell)
+}
+
+// IdleTimeout returns the configured idle-session timeout. Zero means reaping
+// is disabled (IdleTimeoutMin set to a negative value).
+func IdleTimeout() time.Duration {
+	m := Load().IdleTimeoutMin
+	if m < 0 {
+		return 0
+	}
+	if m == 0 {
+		m = DefaultIdleTimeoutMin
+	}
+	return time.Duration(m) * time.Minute
 }
 
 // Save writes the config file atomically (temp + rename), creating the parent

@@ -15,12 +15,12 @@ func TestClaudeCommands(t *testing.T) {
 	if a.Name() != "claude" {
 		t.Fatalf("name = %q", a.Name())
 	}
-	got := a.NewCommand("/tmp", "sid-123")
+	got := a.NewCommand("/tmp", "sid-123", Options{})
 	want := []string{"claude", "--session-id", "sid-123"}
 	if !reflect.DeepEqual(got, want) {
 		t.Fatalf("NewCommand = %v, want %v", got, want)
 	}
-	got = a.ResumeCommand("/tmp", "sid-123")
+	got = a.ResumeCommand("/tmp", "sid-123", Options{})
 	want = []string{"claude", "--resume", "sid-123"}
 	if !reflect.DeepEqual(got, want) {
 		t.Fatalf("ResumeCommand = %v, want %v", got, want)
@@ -33,7 +33,7 @@ func TestCodexCommands(t *testing.T) {
 		t.Fatal("codex not registered")
 	}
 	// NewCommand starts with "codex" and registers the orchid MCP server via -c.
-	got := a.NewCommand("/tmp", "ignored")
+	got := a.NewCommand("/tmp", "ignored", Options{})
 	if got[0] != "codex" {
 		t.Fatalf("NewCommand[0] = %q", got[0])
 	}
@@ -41,7 +41,7 @@ func TestCodexCommands(t *testing.T) {
 		t.Fatalf("NewCommand missing orchid MCP flag: %v", got)
 	}
 	// ResumeCommand keeps the `resume --last` subcommand after the -c flags.
-	rs := a.ResumeCommand("/tmp", "ignored")
+	rs := a.ResumeCommand("/tmp", "ignored", Options{})
 	if rs[len(rs)-2] != "resume" || rs[len(rs)-1] != "--last" {
 		t.Fatalf("ResumeCommand tail = %v", rs)
 	}
@@ -66,10 +66,10 @@ func TestShellCommands(t *testing.T) {
 	if !ok {
 		t.Fatal("shell not registered")
 	}
-	if got := a.NewCommand("/tmp", ""); !reflect.DeepEqual(got, []string{"/bin/zsh"}) {
+	if got := a.NewCommand("/tmp", "", Options{}); !reflect.DeepEqual(got, []string{"/bin/zsh"}) {
 		t.Fatalf("NewCommand = %v", got)
 	}
-	if got := a.ResumeCommand("/tmp", ""); got != nil {
+	if got := a.ResumeCommand("/tmp", "", Options{}); got != nil {
 		t.Fatalf("ResumeCommand = %v, want nil", got)
 	}
 }

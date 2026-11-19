@@ -460,3 +460,54 @@ func TestSignalPersistsRequiresAction(t *testing.T) {
 		t.Fatalf("signal not cleared, got %q", m.records["s1"].Signal)
 	}
 }
+
+func TestReapIdle(t *testing.T) {
+	skipNoTmux(t)
+	m := newTestManager(t)
+	s, err := m.Create("p-1", "/tmp", "shell", CreateOpts{})
+	if err != nil {
+		t.Fatalf("create: %v", err)
+	}
+	defer tmux.KillSession(s.Tmux)
+	id := s.ID
+	m.Signal(id, "idle")
+	// let the shell's startup output settle so the idle window is meaningful
+	time.Sleep(300 * time.Millisecond)
+
+	// disabled: a non-positive timeout never reaps
+	if got := m.ReapIdle(0); len(got) != 0 {
+		t.Fatalf("timeout 0 reaped %v", got)
+	}
+	// not yet past the timeout
+	if got := m.ReapIdle(time.Hour); len(got) != 0 {
+		t.Fatalf("reaped before timeout: %v", got)
+	}
+	// waiting on the user is never reaped, however long it has been quiet
+	m.Signal(id, "requires_action")
+	if got := m.ReapIdle(time.Millisecond); len(got) != 0 {
+		t.Fatalf("reaped a requires_action session: %v", got)
+	}
+
+	m.Signal(id, "idle")
+	got := m.ReapIdle(time.Millisecond)
+	if len(got) != 1 || got[0] != id {
+		t.Fatalf("ReapIdle = %v, want [%s]", got, id)
+	}
+	// the record survives as stopped, so the session can be restarted
+	var info Info
+	for _, i := range m.List() {
+		if i.ID == id {
+			info = i
+		}
+	}
+	if info.ID != id || info.Status != "stopped" || info.Alive {
+		t.Fatalf("after reap info = %+v, want stopped and not alive", info)
+	}
+	if tmux.HasSession(s.Tmux) {
+		t.Fatal("tmux session should be gone after reap")
+	}
+	// already stopped -> nothing left to reap
+	if got := m.ReapIdle(time.Millisecond); len(got) != 0 {
+		t.Fatalf("second reap returned %v", got)
+	}
+}

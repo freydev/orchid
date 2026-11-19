@@ -2,9 +2,11 @@
   import type { Session } from '../lib/types';
   import { app, refresh } from '../lib/state.svelte';
   import { setHash } from '../lib/router';
-  import { agentMeta, statusMeta, shellName } from '../lib/util';
+  import { agentMeta, statusMeta, shellName, escHtml } from '../lib/util';
   import { api } from '../lib/api';
-  import { openModal } from '../lib/modals.svelte';
+  import { toast } from '../lib/toast.svelte';
+  import { openModal, confirm } from '../lib/modals.svelte';
+  import { colorHex } from '../lib/theme';
   import { terminal } from '../actions/terminal';
   import { railResize } from '../actions/railResize';
   import Rail from './Rail.svelte';
@@ -24,7 +26,9 @@
   // keep cur.activeId resolved to the picked session (mirrors app.js mountTerminal)
   $effect(() => {
     if (active && app.cur.activeId !== active.id) app.cur.activeId = active.id;
-    if (!active && app.cur.activeId !== null) app.cur.activeId = null;
+    // only clear a stale activeId once sessions are loaded — clearing while
+    // app.sessions is still empty would drop a deep-linked id before it arrives.
+    else if (!active && app.sessions.length > 0 && app.cur.activeId !== null) app.cur.activeId = null;
   });
 
   const name = $derived(active ? (((active.name || '').trim()) || agentMeta(active.agent).label) : '');
@@ -37,10 +41,26 @@
   const wt = $derived(active ? app.worktrees.find((w) => w.path === active.worktree) : undefined);
   const wtName = $derived(wt?.name ?? '');
   const branch = $derived((wt?.branch || '').trim());
-  const scol = $derived(active?.color);
+  const scol = $derived(colorHex(active?.color));
 
   async function onStop(id: string) { try { await api.stop(id); } finally { await refresh(); } }
   async function onRestart(id: string) { try { await api.restart(id); } finally { await refresh(); } }
+  async function onKill(s: Session) {
+    const ok = await confirm({
+      title: 'Kill session?',
+      body: `Kill <b>${escHtml(name)}</b>? The tmux session and its running process will be terminated.`,
+      confirmLabel: 'Kill',
+    });
+    if (!ok) return;
+    try {
+      await api.kill(s.id);
+    } catch (err) {
+      toast('Kill failed: ' + (err as Error).message, 'error');
+      return;
+    }
+    if (app.cur.activeId === s.id) app.cur.activeId = null;
+    await refresh();
+  }
 </script>
 
 <div class="focus-view">
@@ -71,7 +91,7 @@
           {:else}
             <button class="btn sm icon ghost" title="Restart" onclick={() => onRestart(active.id)}><Icon name="restart" size={18} /></button>
           {/if}
-          <button class="btn sm icon ghost danger" title="Kill (delete session)" onclick={() => openModal('confirmKill', { session: active })}><Icon name="x" size={22} /></button>
+          <button class="btn sm icon ghost danger" title="Kill (delete session)" onclick={() => active && onKill(active)}><Icon name="x" size={22} /></button>
         </div>
         {#if active.alive}
           {#key active.id}
@@ -96,6 +116,7 @@
 
   .term { display: flex; flex-direction: column; min-height: 0; background: var(--term-bg); }
   .term-head { display: flex; align-items: center; gap: 10px; padding: 9px 12px; background: var(--surface); border-bottom: 1px solid var(--border); flex-shrink: 0; }
+  .term-head[style*="--scol"] { border-left: 3px solid var(--scol); padding-left: 9px; background: linear-gradient(90deg, color-mix(in srgb, var(--scol) 22%, transparent), transparent 240px), var(--surface); }
   .term-head .term-id { min-width: 0; flex: 1; }
   .term-head .t { font-size: 12.5px; font-weight: 600; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
   .term-head .tt { font-family: var(--mono); font-size: 11px; color: var(--text-faint); }
@@ -118,5 +139,16 @@
   .pbody :global(.xterm .xterm-viewport),
   .pbody :global(.xterm .xterm-screen) { background-color: var(--term-bg) !important; }
 
+  /* hide xterm's native scrollbar; wheel / touch scrolling still works */
+  .pbody :global(.xterm .xterm-viewport) { scrollbar-width: none; }
+  .pbody :global(.xterm .xterm-viewport::-webkit-scrollbar) { display: none; }
+
   #placeholder { color: var(--text-faint); font-family: var(--mono); font-size: 12px; padding: 14px 16px; }
+
+  @media (max-width: 640px) {
+    .focus-view { grid-template-columns: 1fr; }
+    .focus-rail, .rail-resizer { display: none; }
+    .term-head { flex-wrap: wrap; row-gap: 6px; }
+    .term-head .tt { display: none; }
+  }
 </style>

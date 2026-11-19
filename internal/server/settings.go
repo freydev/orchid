@@ -7,6 +7,7 @@ import (
 	"net/http"
 	"os/exec"
 	"strconv"
+	"strings"
 	"syscall"
 
 	"orchid/internal/agent"
@@ -21,13 +22,21 @@ type settingsOut struct {
 	Port      int      `json:"port"`       // current bind port
 	Addr      string   `json:"addr"`       // host:port the daemon is listening on
 	Shells    []string `json:"shells"`     // shell names detected on this system
+	BaseURL   string   `json:"base_url"`   // external origin for notification deep links
+	// IdleTimeoutMin is the idle-session reap timeout in minutes; negative
+	// means reaping is off.
+	IdleTimeoutMin int `json:"idle_timeout_min"`
 }
 
 type settingsReq struct {
-	Shell  string `json:"shell"`
-	Accent string `json:"accent"`
-	Port   int    `json:"port"`
-	Host   string `json:"host"`
+	Shell   string `json:"shell"`
+	Accent  string `json:"accent"`
+	Port    int    `json:"port"`
+	Host    string `json:"host"`
+	BaseURL string `json:"base_url"`
+	// IdleTimeoutMin is optional: nil leaves the stored value untouched, so a
+	// client that predates this field can't clobber it.
+	IdleTimeoutMin *int `json:"idle_timeout_min"`
 }
 
 // defaultAccent is the accent color id used when none is configured.
@@ -66,6 +75,10 @@ func (s *Server) handleGetSettings(w http.ResponseWriter, r *http.Request) {
 	if accent == "" {
 		accent = defaultAccent
 	}
+	idle := config.Load().IdleTimeoutMin
+	if idle == 0 {
+		idle = config.DefaultIdleTimeoutMin
+	}
 	writeJSON(w, http.StatusOK, settingsOut{
 		Shell:     config.Shell(),
 		Accent:    accent,
@@ -74,6 +87,9 @@ func (s *Server) handleGetSettings(w http.ResponseWriter, r *http.Request) {
 		Port:      port,
 		Addr:      net.JoinHostPort(host, strconv.Itoa(port)),
 		Shells:    agent.AvailableShells(),
+		BaseURL:   config.Load().BaseURL,
+
+		IdleTimeoutMin: idle,
 	})
 }
 
@@ -84,6 +100,7 @@ func (s *Server) handlePutSettings(w http.ResponseWriter, r *http.Request) {
 	}
 	c := config.Load()
 	c.Shell = req.Shell
+	c.BaseURL = strings.TrimRight(strings.TrimSpace(req.BaseURL), "/")
 	if req.Accent != "" {
 		c.Accent = req.Accent
 	}
@@ -92,6 +109,9 @@ func (s *Server) handlePutSettings(w http.ResponseWriter, r *http.Request) {
 	}
 	if req.Host != "" {
 		c.Host = req.Host
+	}
+	if req.IdleTimeoutMin != nil {
+		c.IdleTimeoutMin = *req.IdleTimeoutMin
 	}
 	if err := config.Save(c); err != nil {
 		http.Error(w, err.Error(), http.StatusInternalServerError)

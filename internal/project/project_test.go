@@ -103,3 +103,71 @@ func TestSetWorktreeOrder(t *testing.T) {
 		t.Fatal("expected error for unknown project")
 	}
 }
+
+func TestResolvePathGlobal(t *testing.T) {
+	home, err := os.UserHomeDir()
+	if err != nil {
+		t.Skip("no home dir")
+	}
+	cases := map[string]string{
+		"~":             home,
+		"~/code/x":      filepath.Join(home, "code", "x"),
+		"code/x":        filepath.Join(home, "code", "x"), // relative -> home, not CWD
+		"/abs/path":     "/abs/path",
+		"  ~/y  ":       filepath.Join(home, "y"), // trimmed
+		"/abs/../path2": "/path2",                 // cleaned
+	}
+	for in, want := range cases {
+		got, err := resolvePath(in)
+		if err != nil {
+			t.Errorf("resolvePath(%q) error: %v", in, err)
+			continue
+		}
+		if got != want {
+			t.Errorf("resolvePath(%q) = %q, want %q", in, got, want)
+		}
+	}
+}
+
+func TestGroupsLifecycle(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "projects.json")
+	s := New(path)
+	p, _ := s.Add("proj", gitRepoDir(t))
+	if _, err := s.AddGroup(p.ID, "/wt/a", "  "); err == nil {
+		t.Fatal("empty name accepted")
+	}
+	if _, err := s.AddGroup("nope", "/wt/a", "x"); err == nil {
+		t.Fatal("unknown project accepted")
+	}
+	ga, _ := s.AddGroup(p.ID, "/wt/a", "Review")
+	gb, _ := s.AddGroup(p.ID, "/wt/b", "Research")
+	if err := s.RenameGroup(p.ID, ga.ID, "Reviews"); err != nil {
+		t.Fatalf("rename: %v", err)
+	}
+	if err := s.RenameGroup(p.ID, "g-nope", "x"); err == nil {
+		t.Fatal("rename unknown group accepted")
+	}
+	// persisted across reload
+	s2 := New(path)
+	if err := s2.Load(); err != nil {
+		t.Fatal(err)
+	}
+	got, _ := s2.Get(p.ID)
+	if len(got.Groups) != 2 || got.Groups[0].Name != "Reviews" || got.Groups[1].Worktree != "/wt/b" {
+		t.Fatalf("groups after reload = %+v", got.Groups)
+	}
+	// removing a worktree's groups leaves the others
+	if err := s.RemoveWorktreeGroups(p.ID, "/wt/a"); err != nil {
+		t.Fatal(err)
+	}
+	if err := s.RemoveGroup(p.ID, ga.ID); err == nil {
+		t.Fatal("removing already-dropped group succeeded")
+	}
+	if err := s.RemoveGroup(p.ID, gb.ID); err != nil {
+		t.Fatalf("remove: %v", err)
+	}
+	got, _ = s.Get(p.ID)
+	if len(got.Groups) != 0 {
+		t.Fatalf("groups remain: %+v", got.Groups)
+	}
+}

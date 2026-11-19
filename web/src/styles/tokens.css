@@ -31,6 +31,9 @@
   /* type — sans for UI, mono only for code/terminal */
   --sans: "Inter", system-ui, -apple-system, "Segoe UI", sans-serif;
   --mono: "JetBrains Mono", ui-monospace, "SF Mono", Menlo, monospace;
+  /* the terminal's font stack (mirrors actions/terminal.ts) — used by the diff
+     viewer so code reads identically to the xterm panes */
+  --term-font: "Fira Mono", "JetBrains Mono", ui-monospace, Menlo, monospace;
 
   /* density */
   --row-pad: 14px;

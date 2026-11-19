@@ -15,7 +15,7 @@ import (
 )
 
 func TestEmbedFSContainsExpectedFiles(t *testing.T) {
-	files := []string{"index.html", "app.js", "vendor/xterm.js", "vendor/xterm.css", "vendor/addon-fit.js"}
+	files := []string{"dist/index.html", "dist/bundle.js", "dist/bundle.css", "dist/orchid-logo.svg"}
 	for _, f := range files {
 		data, err := fs.ReadFile(web.FS, f)
 		if err != nil {
@@ -40,11 +40,12 @@ func TestStaticFilesServed(t *testing.T) {
 		path string
 		want int
 	}{
-		{"/vendor/xterm.js", 200},
-		{"/vendor/xterm.css", 200},
-		{"/vendor/addon-fit.js", 200},
-		{"/app.js", 200},
+		{"/bundle.js", 200},
+		{"/bundle.css", 200},
+		{"/orchid-logo.svg", 200},
 		{"/", 200},
+		{"/app.js", 404},          // vanilla asset removed by Svelte migration
+		{"/vendor/xterm.js", 404}, // xterm now bundled into bundle.js
 	}
 	for _, tt := range tests {
 		resp, err := http.Get(srv.URL + tt.path)
@@ -61,17 +62,14 @@ func TestStaticFilesServed(t *testing.T) {
 		}
 	}
 
-	// Verify index.html references xterm.js
+	// Verify index.html loads the Svelte bundle
 	resp, err := http.Get(srv.URL + "/")
 	if err != nil {
 		t.Fatalf("GET /: %v", err)
 	}
 	body, _ := io.ReadAll(resp.Body)
 	resp.Body.Close()
-	count := strings.Count(string(body), "xterm.js")
-	if count == 0 {
-		t.Error("index.html does not reference xterm.js")
-	} else {
-		t.Logf("OK index.html xterm.js reference count: %d", count)
+	if !strings.Contains(string(body), "bundle.js") {
+		t.Error("index.html does not reference bundle.js")
 	}
 }

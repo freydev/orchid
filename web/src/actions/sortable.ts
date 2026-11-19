@@ -5,6 +5,10 @@ export type SortableParams = {
   itemSel: string;
   getId: (el: HTMLElement) => string;
   onOrder: (ids: string[]) => void;
+  // lists sharing a group name accept each other's items; a cross-list drop is
+  // reverted in the DOM (Svelte owns it) and reported via onTransfer instead
+  group?: string;
+  onTransfer?: (id: string, to: HTMLElement) => void;
 };
 
 export function sortable(node: HTMLElement, params: SortableParams) {
@@ -16,10 +20,17 @@ export function sortable(node: HTMLElement, params: SortableParams) {
       animation: 140,
       ghostClass: 'drag-ghost',
       fallbackOnBody: true,
-      onEnd: () =>
+      group: p.group,
+      onEnd: (e) => {
+        if (e.from !== e.to) {
+          e.from.insertBefore(e.item, e.from.children[e.oldIndex ?? 0] ?? null);
+          p.onTransfer?.(p.getId(e.item), e.to);
+          return;
+        }
         p.onOrder(
           [...node.querySelectorAll(':scope > ' + p.itemSel)].map((el) => p.getId(el as HTMLElement)),
-        ),
+        );
+      },
     });
   }
   create(params);

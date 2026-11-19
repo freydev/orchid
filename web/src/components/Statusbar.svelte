@@ -1,7 +1,14 @@
 <script lang="ts">
   // bottom status bar (tmux/vim style): mode · context · session counts — ported from web/app.js
   import { app } from '../lib/state.svelte';
+  import { sendToTerminal } from '../lib/terminalInput';
   import type { Session } from '../lib/types';
+
+  // arrow-key escape sequences (mobile keyboards lack arrow keys)
+  const ARROW_UP = '\x1b[A';
+  const ARROW_DOWN = '\x1b[B';
+  const ENTER = '\r';
+  const onTermTab = $derived(!!app.cur.projectId);
 
   const sb = $derived.by(() => {
     let list: Session[];
@@ -11,7 +18,7 @@
       list = app.sessions;
       const proj = app.projects.find((p) => p.id === app.cur.projectId);
       ctxProject = proj ? proj.name : "project";
-      ctxText = app.cur.view;
+      ctxText = list.length + " session" + (list.length === 1 ? "" : "s");
     } else {
       list = app.projects.flatMap((p) => p.session_list || []);
       ctxProject = null;
@@ -28,11 +35,18 @@
 </script>
 
 <div class="statusbar">
-  <div class="sb-seg sb-mode">orchid</div>
+  <div class="sb-seg sb-mode">Orchid</div>
   <div class="sb-seg sb-ctx">
     {#if sb.ctxProject !== null}<span class="accent">{sb.ctxProject}</span> · {sb.ctxText}{:else}{sb.ctxText}{/if}
   </div>
   <div class="spacer"></div>
+  {#if onTermTab}
+    <div class="sb-keys">
+      <button class="sb-key" title="Arrow up" aria-label="Arrow up" onclick={() => sendToTerminal(app.cur.activeId, ARROW_UP)}>↑</button>
+      <button class="sb-key" title="Arrow down" aria-label="Arrow down" onclick={() => sendToTerminal(app.cur.activeId, ARROW_DOWN)}>↓</button>
+      <button class="sb-key wide" title="Enter" aria-label="Enter" onclick={() => sendToTerminal(app.cur.activeId, ENTER)}>⏎</button>
+    </div>
+  {/if}
   <div class="sb-counts">
     <span class="sb-count ok"><span class="dot ok"></span>{sb.running} run</span>
     <span class="sb-count wait"><span class="dot wait"></span>{sb.waiting} wait</span>
@@ -54,4 +68,17 @@
   .dot.ok { background: var(--ok); }
   .dot.wait { background: var(--wait); }
   .dot.idle { background: var(--idle); }
+
+  /* mobile terminal arrow keys — hidden on desktop (hardware keyboard has them) */
+  .sb-keys { display: none; }
+  .sb-key { display: inline-flex; align-items: center; justify-content: center; height: 100%; min-width: 46px; padding: 0 12px; font-size: 16px; line-height: 1; color: var(--text); border-left: 1px solid var(--border); }
+  .sb-key:active { background: var(--accent-bg); color: var(--accent); }
+  .sb-key.wide { min-width: 54px; font-size: 18px; }
+
+  @media (max-width: 640px) {
+    .sb-ctx { display: none; }
+    .sb-seg { padding: 0 10px; }
+    .sb-keys { display: flex; }
+    .sb-counts { gap: 10px; padding: 0 10px; }
+  }
 </style>

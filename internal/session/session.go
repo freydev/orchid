@@ -33,7 +33,7 @@ type Session struct {
 	mu         sync.Mutex
 	alive      bool
 	lastOutput time.Time
-	sub        *attachment
+	subs       map[*attachment]struct{} // live WS clients (multiple windows)
 	doneOnce   sync.Once
 }
 
@@ -73,6 +73,7 @@ func attachSession(rec store.Record, onExit func()) (*Session, error) {
 		onExit:         onExit,
 		alive:          true,
 		lastOutput:     time.Now(),
+		subs:           make(map[*attachment]struct{}),
 	}, nil
 }
 
@@ -91,29 +92,32 @@ func (s *Session) readLoop() {
 	}
 	s.mu.Lock()
 	s.alive = false
-	if s.sub != nil {
-		closeOnce(s.sub.done)
-		s.sub = nil
+	for a := range s.subs {
+		closeOnce(a.done)
 	}
+	s.subs = make(map[*attachment]struct{})
 	s.mu.Unlock()
 	if s.onExit != nil {
 		s.onExit()
 	}
 }
 
-// broadcast writes output to the ring and the live subscriber (if any).
+// broadcast writes output to the ring and fans it out to every live subscriber
+// (each open window/tab), so multiple views of the same session stay live.
 func (s *Session) broadcast(p []byte) {
 	s.ring.Write(p)
 	s.mu.Lock()
-	a := s.sub
-	s.mu.Unlock()
-	if a == nil {
-		return
+	subs := make([]*attachment, 0, len(s.subs))
+	for a := range s.subs {
+		subs = append(subs, a)
 	}
-	cp := append([]byte(nil), p...)
-	select {
-	case a.ch <- cp:
-	case <-a.done:
+	s.mu.Unlock()
+	for _, a := range subs {
+		cp := append([]byte(nil), p...)
+		select {
+		case a.ch <- cp:
+		case <-a.done:
+		}
 	}
 }
 
@@ -126,6 +130,13 @@ func (s *Session) Write(p []byte) (int, error) {
 
 func (s *Session) Resize(cols, rows uint16) error {
 	return s.ctl.Resize(cols, rows)
+}
+
+// Size returns the current tmux pane geometry (0,0 if unknown). Used to seed a
+// read-only preview pane so redraw-heavy agents (claude/codex) render the same
+// screen the real pane has, instead of into a too-small grid.
+func (s *Session) Size() (cols, rows uint16) {
+	return s.ctl.Size()
 }
 
 func (s *Session) Alive() bool {
@@ -146,32 +157,29 @@ func (s *Session) Close() {
 	s.doneOnce.Do(func() { _ = s.ctl.Close() })
 }
 
-// Attach registers a new live subscriber, kicking any previous one.
-// Returns nil if the session is already dead.
+// Attach registers a new live subscriber. Multiple may be attached at once
+// (several windows/tabs viewing the same session). Returns nil if dead.
 func (s *Session) Attach() *attachment {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	if !s.alive {
 		return nil
 	}
-	if s.sub != nil {
-		closeOnce(s.sub.done)
-	}
 	a := &attachment{ch: make(chan []byte, 256), done: make(chan struct{})}
-	s.sub = a
+	s.subs[a] = struct{}{}
 	return a
 }
 
-// Detach removes a as the current subscriber if it still is one.
+// Detach removes a subscriber.
 func (s *Session) Detach(a *attachment) {
 	if a == nil {
 		return
 	}
 	s.mu.Lock()
 	defer s.mu.Unlock()
-	if s.sub == a {
-		closeOnce(s.sub.done)
-		s.sub = nil
+	if _, ok := s.subs[a]; ok {
+		closeOnce(a.done)
+		delete(s.subs, a)
 	}
 }
 

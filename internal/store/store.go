@@ -22,11 +22,12 @@ type Record struct {
 	Created        time.Time `json:"created"`
 	Status         string    `json:"status"` // "running" | "stopped"
 	Order          int       `json:"order,omitempty"`
-	GridOrder      int       `json:"grid_order,omitempty"`
-	Signal         string    `json:"signal,omitempty"` // persisted "requires_action" so it survives restart
-	Color          string    `json:"color,omitempty"`   // accent color id ("blue"...), overrides agent color
-	Shell          string    `json:"shell,omitempty"`   // shell choice for "shell" sessions ("" = inherit)
-	Command        string    `json:"command,omitempty"` // preset command run in this shell session (via `shell -c`)
+	Signal         string    `json:"signal,omitempty"`    // persisted "requires_action" so it survives restart
+	Color          string    `json:"color,omitempty"`     // accent color id ("blue"...), overrides agent color
+	Shell          string    `json:"shell,omitempty"`     // shell choice for "shell" sessions ("" = inherit)
+	Command        string    `json:"command,omitempty"`   // preset command run in this shell session (via `shell -c`)
+	Dangerous      bool      `json:"dangerous,omitempty"` // launch agent with "dangerously skip permissions" (claude/codex); survives restart
+	Group          string    `json:"group,omitempty"`     // project group id ("" = ungrouped)
 }
 
 // DefaultPath returns the sessions file under ~/.config/orchid (honoring

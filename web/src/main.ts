@@ -8,7 +8,25 @@ import { applyAccent, applyMonokai, applyRailWidth, DEFAULT_ACCENT } from './lib
 import { start } from './lib/router';
 import { pollStatus } from './lib/poll';
 
+// A desktop-notification deep link arrives as `?s=<projectId>~<sessionId>`
+// (a query, not a hash, so it survives a PWA "navigate-existing" launch which
+// drops the fragment). Convert it to the hash route the router understands.
+function consumeDeepLink() {
+  let s = new URLSearchParams(location.search).get('s');
+  if (!s) return;
+  // PWA protocol_handlers deliver the value as the full "web+orchid://<...>"
+  // URL; a plain browser open uses the bare value. Accept both.
+  s = s.replace(/^web\+orchid:\/\//i, '');
+  const i = s.indexOf('~');
+  if (i < 0) return;
+  const pid = s.slice(0, i), sid = s.slice(i + 1);
+  if (!pid || !sid) return;
+  const hash = '#/p/' + encodeURIComponent(pid) + '/terminal/' + encodeURIComponent(sid);
+  history.replaceState(null, '', location.pathname + hash); // drop ?s, set route
+}
+
 async function boot() {
+  consumeDeepLink();
   try { app.settings = await api.settings(); } catch {}
   try { app.shellName = (await api.shell()).name; } catch {}
   const accent = app.settings.accent || DEFAULT_ACCENT;

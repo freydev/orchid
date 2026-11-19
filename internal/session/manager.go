@@ -5,6 +5,7 @@ import (
 	"encoding/hex"
 	"fmt"
 	"log"
+	"path/filepath"
 	"sort"
 	"strings"
 	"sync"
@@ -26,12 +27,12 @@ type Info struct {
 	Cwd      string `json:"cwd"`
 	Project  string `json:"project"`
 	Worktree string `json:"worktree"`
-	Status    string `json:"status"` // "running" | "requires_action" | "idle" | "stopped"
-	Alive     bool   `json:"alive"`
-	GridOrder int    `json:"grid_order"`
-	Color     string `json:"color,omitempty"`   // accent color id, overrides agent color
-	Shell     string `json:"shell,omitempty"`   // shell choice for "shell" sessions
-	Command   string `json:"command,omitempty"` // preset command running in this shell session
+	Status   string `json:"status"` // "running" | "requires_action" | "idle" | "stopped"
+	Alive    bool   `json:"alive"`
+	Color    string `json:"color,omitempty"`   // accent color id, overrides agent color
+	Shell    string `json:"shell,omitempty"`   // shell choice for "shell" sessions
+	Command  string `json:"command,omitempty"` // preset command running in this shell session
+	Group    string `json:"group,omitempty"`   // project group id ("" = ungrouped)
 }
 
 // Manager owns sessions (running, with a live PTY) and records (all, incl. stopped).
@@ -108,12 +109,13 @@ func (m *Manager) freshArgv(ag agent.Agent, rec store.Record, resume bool) []str
 	if rec.Agent == "shell" {
 		return m.shellArgvFor(rec)
 	}
+	opts := agent.Options{SkipPermissions: rec.Dangerous}
 	if resume {
-		if argv := ag.ResumeCommand(rec.Cwd, rec.AgentSessionID); argv != nil {
+		if argv := ag.ResumeCommand(rec.Cwd, rec.AgentSessionID, opts); argv != nil {
 			return argv
 		}
 	}
-	return ag.NewCommand(rec.Cwd, rec.AgentSessionID)
+	return ag.NewCommand(rec.Cwd, rec.AgentSessionID, opts)
 }
 
 // sessionEnv returns the tmux env entries for a session id.
@@ -169,11 +171,14 @@ func (m *Manager) onExit(id string) {
 
 // CreateOpts carries the optional per-session settings chosen at creation.
 type CreateOpts struct {
-	Name     string
-	Color    string
-	Shell    string // shell choice for "shell" sessions ("" = inherit)
-	Command  string // preset command to run via `shell -c` (shell sessions only)
-	ResumeID string // existing agent session id to resume/import (claude only)
+	Name      string
+	Color     string
+	Shell     string // shell choice for "shell" sessions ("" = inherit)
+	Command   string // preset command to run via `shell -c` (shell sessions only)
+	ResumeID  string // existing agent session id to resume/import (claude only)
+	Dangerous bool   // launch claude/codex with "dangerously skip permissions"
+	Cwd       string // launch dir override (a subdir of worktree; "" = worktree)
+	Group     string // project group id ("" = ungrouped)
 }
 
 func (m *Manager) Create(projectID, worktree, agentName string, opts CreateOpts) (*Session, error) {
@@ -189,11 +194,17 @@ func (m *Manager) Create(projectID, worktree, agentName string, opts CreateOpts)
 	if resume {
 		agentSessionID = strings.TrimSpace(opts.ResumeID)
 	}
+	// launch dir: a subdir of the worktree (e.g. resuming a claude session that
+	// ran in a subfolder), else the worktree itself. Guard against escaping it.
+	cwd := worktree
+	if c := strings.TrimSpace(opts.Cwd); c != "" && (c == worktree || strings.HasPrefix(c, worktree+string(filepath.Separator))) {
+		cwd = c
+	}
 	rec := store.Record{
 		ID:             id,
 		Name:           strings.TrimSpace(opts.Name),
 		Agent:          agentName,
-		Cwd:            worktree,
+		Cwd:            cwd,
 		Project:        projectID,
 		Worktree:       worktree,
 		Tmux:           "orchid-" + id,
@@ -203,6 +214,8 @@ func (m *Manager) Create(projectID, worktree, agentName string, opts CreateOpts)
 		Color:          strings.TrimSpace(opts.Color),
 		Shell:          strings.TrimSpace(opts.Shell),
 		Command:        strings.TrimSpace(opts.Command),
+		Dangerous:      opts.Dangerous,
+		Group:          strings.TrimSpace(opts.Group),
 	}
 	s, err := createSession(rec, m.freshArgv(ag, rec, resume), m.sessionEnv(id), func() { m.onExit(id) })
 	if err != nil {
@@ -422,6 +435,7 @@ type SessUpdate struct {
 	Name  *string
 	Color *string
 	Shell *string
+	Group *string
 }
 
 // Update applies the non-nil fields of u to a session record and persists.
@@ -441,6 +455,9 @@ func (m *Manager) Update(id string, u SessUpdate) error {
 	if u.Shell != nil {
 		rec.Shell = strings.TrimSpace(*u.Shell)
 	}
+	if u.Group != nil {
+		rec.Group = strings.TrimSpace(*u.Group)
+	}
 	m.records[id] = rec
 	m.saveLocked()
 	return nil
@@ -455,24 +472,6 @@ func (m *Manager) Reorder(ids []string) {
 	for i, id := range ids {
 		if r, ok := m.records[id]; ok && r.Order != i {
 			r.Order = i
-			m.records[id] = r
-			changed = true
-		}
-	}
-	if changed {
-		m.saveLocked()
-	}
-}
-
-// ReorderGrid sets the grid-display GridOrder of the given session ids to their
-// position (a separate order from Reorder, used by the Grid tab) and persists.
-func (m *Manager) ReorderGrid(ids []string) {
-	m.mu.Lock()
-	defer m.mu.Unlock()
-	changed := false
-	for i, id := range ids {
-		if r, ok := m.records[id]; ok && r.GridOrder != i {
-			r.GridOrder = i
 			m.records[id] = r
 			changed = true
 		}
@@ -526,14 +525,14 @@ func (m *Manager) List() []Info {
 			Name:     e.rec.Name,
 			Agent:    e.rec.Agent,
 			Cwd:      e.rec.Cwd,
-			Project:   e.rec.Project,
-			Worktree:  e.rec.Worktree,
-			Status:    status,
-			Alive:     e.s != nil,
-			GridOrder: e.rec.GridOrder,
-			Color:     e.rec.Color,
-			Shell:     e.rec.Shell,
-			Command:   e.rec.Command,
+			Project:  e.rec.Project,
+			Worktree: e.rec.Worktree,
+			Status:   status,
+			Alive:    e.s != nil,
+			Color:    e.rec.Color,
+			Shell:    e.rec.Shell,
+			Command:  e.rec.Command,
+			Group:    e.rec.Group,
 		})
 	}
 	return out
@@ -566,6 +565,46 @@ func resolveStatus(agentName string, s *Session, sg signalState, has bool) strin
 		}
 		return "idle"
 	}
+}
+
+// ReapIdle stops every live session that has produced no pane output for at
+// least timeout and whose status is "idle". Sessions that are running, or that
+// are waiting on the user (requires_action), are left alone. Reaping uses Stop,
+// so each record survives as "stopped" and can be restarted (agents resume).
+// A non-positive timeout disables reaping. Returns the ids that were stopped.
+func (m *Manager) ReapIdle(timeout time.Duration) []string {
+	if timeout <= 0 {
+		return nil
+	}
+	m.mu.Lock()
+	var candidates []string
+	for id, s := range m.sessions {
+		rec, ok := m.records[id]
+		if !ok {
+			continue
+		}
+		var sg signalState
+		has := false
+		if v := m.signals[id]; v != nil {
+			sg, has = *v, true
+		}
+		if resolveStatus(rec.Agent, s, sg, has) != "idle" || s.Active(timeout) {
+			continue
+		}
+		candidates = append(candidates, id)
+	}
+	m.mu.Unlock()
+
+	reaped := make([]string, 0, len(candidates))
+	for _, id := range candidates {
+		if err := m.Stop(id); err != nil {
+			log.Printf("orchid: reap idle %s: %v", id, err)
+			continue
+		}
+		reaped = append(reaped, id)
+	}
+	sort.Strings(reaped)
+	return reaped
 }
 
 // Kill terminates a session for good: kill tmux, drop session + record.
@@ -650,41 +689,51 @@ func orphanSessions(names []string, known map[string]bool, prefix string) []stri
 // KillByProject terminates every session (running or stopped) of a project:
 // kills tmux, drops session + record. Git worktrees are NOT touched. Returns count.
 func (m *Manager) KillByProject(projectID string) int {
-	m.mu.Lock()
-	var victims []store.Record
-	var live []*Session
-	for id, r := range m.records {
-		if r.Project == projectID {
-			victims = append(victims, r)
-			if s := m.sessions[id]; s != nil {
-				live = append(live, s)
-			}
-			delete(m.records, id)
-			delete(m.sessions, id)
-			delete(m.signals, id)
-		}
-	}
-	m.mu.Unlock()
-	for _, s := range live {
-		s.Close()
-	}
-	for _, r := range victims {
-		_ = tmux.KillSession(r.Tmux)
-	}
-	m.mu.Lock()
-	m.saveLocked()
-	m.mu.Unlock()
-	return len(victims)
+	return m.killWhere(func(r store.Record) bool { return r.Project == projectID })
 }
 
 // KillByWorktree terminates every session (running or stopped) bound to the
 // given worktree path: kill tmux, drop session + record. Returns the count.
 func (m *Manager) KillByWorktree(worktree string) int {
+	return m.killWhere(func(r store.Record) bool { return r.Worktree == worktree })
+}
+
+// KillByGroup terminates every session (running or stopped) in a group. The
+// group itself lives in the project store and is left alone. Returns the count.
+func (m *Manager) KillByGroup(group string) int {
+	if group == "" {
+		return 0
+	}
+	return m.killWhere(func(r store.Record) bool { return r.Group == group })
+}
+
+// Ungroup moves every session of a group to "ungrouped" and persists.
+func (m *Manager) Ungroup(group string) {
+	if group == "" {
+		return
+	}
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	changed := false
+	for id, r := range m.records {
+		if r.Group == group {
+			r.Group = ""
+			m.records[id] = r
+			changed = true
+		}
+	}
+	if changed {
+		m.saveLocked()
+	}
+}
+
+// killWhere kills tmux + drops session/record for every record matching pred.
+func (m *Manager) killWhere(pred func(store.Record) bool) int {
 	m.mu.Lock()
 	var victims []store.Record
 	var live []*Session
 	for id, r := range m.records {
-		if r.Worktree == worktree {
+		if pred(r) {
 			victims = append(victims, r)
 			if s := m.sessions[id]; s != nil {
 				live = append(live, s)
@@ -698,9 +747,13 @@ func (m *Manager) KillByWorktree(worktree string) int {
 	for _, s := range live {
 		s.Close()
 	}
+	// KillSession escalates signals with waits (up to ~6s each): run in parallel
+	var wg sync.WaitGroup
 	for _, r := range victims {
-		_ = tmux.KillSession(r.Tmux)
+		wg.Add(1)
+		go func(name string) { defer wg.Done(); _ = tmux.KillSession(name) }(r.Tmux)
 	}
+	wg.Wait()
 	m.mu.Lock()
 	m.saveLocked()
 	m.mu.Unlock()

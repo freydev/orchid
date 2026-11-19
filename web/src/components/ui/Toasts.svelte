@@ -26,4 +26,8 @@
   .toast.out { animation: toastOut .2s forwards; }
   @keyframes toastOut { to { opacity: 0; transform: translateY(6px); } }
   @keyframes pop { from { transform: translateY(8px) scale(.98); opacity: 0; } }
+
+  @media (max-width: 640px) {
+    .toasts { left: 12px; right: 12px; transform: none; align-items: stretch; }
+  }
 </style>

@@ -23,6 +23,10 @@ type Control struct {
 	writeMu sync.Mutex
 	ch      chan []byte
 	started bool
+
+	sizeMu sync.Mutex
+	cols   uint16
+	rows   uint16
 }
 
 // Attach starts `tmux -CC attach -t name` under a PTY and discovers the pane id.
@@ -44,10 +48,40 @@ func Attach(name string) (*Control, error) {
 		return nil, err
 	}
 	c.pane = pane
+	c.querySize() // best-effort initial pane geometry (setup phase, before Start)
 	return c, nil
 }
 
 func (c *Control) Pane() string { return c.pane }
+
+// querySize reads the pane's current width/height. Setup-phase only (no
+// concurrent reader); best-effort — leaves size 0 on failure.
+func (c *Control) querySize() {
+	if err := c.writeCmd("display-message -p -t %s -F '#{pane_width} #{pane_height}'", c.pane); err != nil {
+		return
+	}
+	block, _ := c.readReplyBlock()
+	for _, l := range block {
+		var w, h uint16
+		if _, err := fmt.Sscanf(string(l), "%d %d", &w, &h); err == nil && w > 0 && h > 0 {
+			c.setSize(w, h)
+			return
+		}
+	}
+}
+
+func (c *Control) setSize(cols, rows uint16) {
+	c.sizeMu.Lock()
+	c.cols, c.rows = cols, rows
+	c.sizeMu.Unlock()
+}
+
+// Size returns the last known pane geometry (0,0 if unknown).
+func (c *Control) Size() (cols, rows uint16) {
+	c.sizeMu.Lock()
+	defer c.sizeMu.Unlock()
+	return c.cols, c.rows
+}
 
 func (c *Control) readLine() ([]byte, error) {
 	line, err := c.br.ReadBytes('\n')
@@ -160,7 +194,11 @@ func (c *Control) Resize(cols, rows uint16) error {
 	if cols == 0 || rows == 0 {
 		return nil
 	}
-	return c.writeCmd("refresh-client -C %dx%d", cols, rows)
+	if err := c.writeCmd("refresh-client -C %dx%d", cols, rows); err != nil {
+		return err
+	}
+	c.setSize(cols, rows)
+	return nil
 }
 
 // Close terminates the control client. The tmux session survives.

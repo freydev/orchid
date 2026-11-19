@@ -2,12 +2,17 @@ package server
 
 import (
 	"encoding/json"
+	"fmt"
 	"net/http"
+	"os"
 	"path/filepath"
+	"slices"
 	"sort"
 	"strings"
+	"sync"
 
 	"orchid/internal/agent"
+	"orchid/internal/config"
 	"orchid/internal/gitwt"
 	"orchid/internal/notify"
 	"orchid/internal/project"
@@ -19,14 +24,17 @@ func (s *Server) handleList(w http.ResponseWriter, r *http.Request) {
 }
 
 type createReq struct {
-	Project  string `json:"project"`
-	Worktree string `json:"worktree"`
-	Agent    string `json:"agent"`
-	Name     string `json:"name"`
-	Color    string `json:"color"`
-	Shell    string `json:"shell"`
-	Command  string `json:"command"`
-	ResumeID string `json:"resume_id"`
+	Project   string `json:"project"`
+	Worktree  string `json:"worktree"`
+	Agent     string `json:"agent"`
+	Name      string `json:"name"`
+	Color     string `json:"color"`
+	Shell     string `json:"shell"`
+	Command   string `json:"command"`
+	ResumeID  string `json:"resume_id"`
+	Dangerous bool   `json:"dangerous"`
+	Cwd       string `json:"cwd"` // launch dir override (subdir of worktree)
+	Group     string `json:"group"`
 }
 
 // sessPatchReq is the PATCH body for a session. Pointer fields distinguish
@@ -36,6 +44,7 @@ type sessPatchReq struct {
 	Name  *string `json:"name"`
 	Color *string `json:"color"`
 	Shell *string `json:"shell"`
+	Group *string `json:"group"`
 }
 
 func (s *Server) handleCreate(w http.ResponseWriter, r *http.Request) {
@@ -57,19 +66,16 @@ func (s *Server) handleCreate(w http.ResponseWriter, r *http.Request) {
 		http.Error(w, err.Error(), http.StatusInternalServerError)
 		return
 	}
-	valid := false
-	for _, wt := range wts {
-		if wt.Path == req.Worktree {
-			valid = true
-			break
-		}
-	}
-	if !valid {
+	if !hasWorktree(wts, req.Worktree) {
 		http.Error(w, "worktree not found in project", http.StatusBadRequest)
 		return
 	}
+	if req.Group != "" && !groupIn(proj, req.Group, req.Worktree) {
+		http.Error(w, "group not found in worktree", http.StatusBadRequest)
+		return
+	}
 	sess, err := s.mgr.Create(req.Project, req.Worktree, req.Agent, session.CreateOpts{
-		Name: req.Name, Color: req.Color, Shell: req.Shell, Command: req.Command, ResumeID: req.ResumeID,
+		Name: req.Name, Color: req.Color, Shell: req.Shell, Command: req.Command, ResumeID: req.ResumeID, Dangerous: req.Dangerous, Cwd: req.Cwd, Group: req.Group,
 	})
 	if err != nil {
 		if strings.Contains(err.Error(), "unknown agent") {
@@ -83,6 +89,7 @@ func (s *Server) handleCreate(w http.ResponseWriter, r *http.Request) {
 		"id": sess.ID, "name": strings.TrimSpace(req.Name), "agent": sess.Agent, "project": sess.Project,
 		"worktree": sess.Worktree, "cwd": sess.Cwd, "status": "running", "alive": true,
 		"color": strings.TrimSpace(req.Color), "shell": strings.TrimSpace(req.Shell), "command": strings.TrimSpace(req.Command),
+		"group": req.Group,
 	})
 }
 
@@ -92,7 +99,26 @@ func (s *Server) handleRename(w http.ResponseWriter, r *http.Request) {
 	if r.Body != nil {
 		_ = json.NewDecoder(r.Body).Decode(&req)
 	}
-	if err := s.mgr.Update(id, session.SessUpdate{Name: req.Name, Color: req.Color, Shell: req.Shell}); err != nil {
+	if req.Group != nil && *req.Group != "" {
+		// a session may only join a group of its own project + worktree
+		var inf *session.Info
+		for _, i := range s.mgr.List() {
+			if i.ID == id {
+				inf = &i
+				break
+			}
+		}
+		if inf == nil {
+			http.Error(w, "session not found", http.StatusNotFound)
+			return
+		}
+		proj, ok := s.projects.Get(inf.Project)
+		if !ok || !groupIn(proj, *req.Group, inf.Worktree) {
+			http.Error(w, "group not found in session's worktree", http.StatusBadRequest)
+			return
+		}
+	}
+	if err := s.mgr.Update(id, session.SessUpdate{Name: req.Name, Color: req.Color, Shell: req.Shell, Group: req.Group}); err != nil {
 		http.Error(w, err.Error(), http.StatusNotFound)
 		return
 	}
@@ -153,6 +179,26 @@ func (s *Server) handleStatus(w http.ResponseWriter, r *http.Request) {
 
 // handleNotify shows a desktop notification that this session's agent finished.
 // Fired by the Stop hook and the MCP notify tool.
+// sessionURL builds the dashboard deep link that focuses a session's terminal,
+// opened when a desktop notification is clicked. Empty when project is unknown.
+// (host/id come from trusted local state, so no escaping is needed.)
+func (s *Server) sessionURL(project, id string) string {
+	if project == "" {
+		return ""
+	}
+	base := strings.TrimRight(strings.TrimSpace(config.Load().BaseURL), "/")
+	if base == "" {
+		host := s.host
+		if host == "" || host == "0.0.0.0" || host == "::" {
+			host = "127.0.0.1"
+		}
+		base = fmt.Sprintf("http://%s:%d", host, s.port)
+	}
+	// Use a query (not a #fragment): a PWA "navigate-existing" launch drops the
+	// fragment but keeps the query. The frontend converts ?s into the route.
+	return base + fmt.Sprintf("/?s=%s~%s", project, id)
+}
+
 func (s *Server) handleNotify(w http.ResponseWriter, r *http.Request) {
 	id := r.PathValue("id")
 	var req struct {
@@ -161,25 +207,26 @@ func (s *Server) handleNotify(w http.ResponseWriter, r *http.Request) {
 	if r.Body != nil {
 		_ = json.NewDecoder(r.Body).Decode(&req)
 	}
-	name := ""
+	name, project := "", ""
 	for _, inf := range s.mgr.List() {
 		if inf.ID == id {
 			name = strings.TrimSpace(inf.Name)
 			if name == "" {
 				name = inf.Agent
 			}
+			project = inf.Project
 			break
 		}
 	}
-	title := "orchid"
+	title := "Orchid"
 	if name != "" {
-		title = "orchid · " + name
+		title = "Orchid · " + name
 	}
 	body := strings.TrimSpace(req.Message)
 	if body == "" {
 		body = "Agent finished working"
 	}
-	notify.Notify(title, body)
+	notify.Notify(title, body, s.sessionURL(project, id))
 	w.WriteHeader(http.StatusNoContent)
 }
 
@@ -256,10 +303,12 @@ type rmWorktreeReq struct {
 	Path string `json:"path"`
 }
 type wtInfo struct {
-	Path   string `json:"path"`
-	Branch string `json:"branch"`
-	Name   string `json:"name"`
-	IsMain bool   `json:"is_main"`
+	Path    string          `json:"path"`
+	Branch  string          `json:"branch"`
+	Name    string          `json:"name"`
+	IsMain  bool            `json:"is_main"`
+	Primary bool            `json:"primary,omitempty"` // git's primary worktree: never removable
+	Groups  []project.Group `json:"groups"`            // session groups of this worktree, creation order
 }
 
 type sessChip struct {
@@ -282,7 +331,21 @@ type projOut struct {
 	Branch      string           `json:"branch,omitempty"` // current branch of the main worktree
 	Worktrees   int              `json:"worktrees"`
 	Sessions    int              `json:"sessions"`
-	SessionList []sessChip       `json:"session_list"` // worktree-order then session-order
+	SessionList []sessChip       `json:"session_list"`      // worktree-order then session-order
+	Problem     string           `json:"problem,omitempty"` // "folder missing" / "not a git repo" — empty when healthy
+}
+
+// projectProblem reports why a project's path is unusable, or "" when healthy:
+// the folder is gone, or it exists but has no .git entry.
+func projectProblem(path string) string {
+	fi, err := os.Stat(path)
+	if err != nil || !fi.IsDir() {
+		return "folder missing"
+	}
+	if _, err := os.Stat(filepath.Join(path, ".git")); err != nil {
+		return "not a git repo"
+	}
+	return ""
 }
 
 func (s *Server) handleProjects(w http.ResponseWriter, r *http.Request) {
@@ -335,6 +398,7 @@ func (s *Server) handleProjects(w http.ResponseWriter, r *http.Request) {
 			Color: p.Color, Description: p.Description, Shell: p.Shell, BaseBranch: p.BaseBranch, Commands: p.Commands,
 			Branch:    gitwt.CurrentBranch(p.Path),
 			Worktrees: len(wtPaths), Sessions: len(list), SessionList: list,
+			Problem: projectProblem(p.Path),
 		})
 	}
 	writeJSON(w, http.StatusOK, out)
@@ -369,13 +433,6 @@ func (s *Server) handleSessionsOrder(w http.ResponseWriter, r *http.Request) {
 	var req orderReq
 	_ = json.NewDecoder(r.Body).Decode(&req)
 	s.mgr.Reorder(req.IDs)
-	w.WriteHeader(http.StatusNoContent)
-}
-
-func (s *Server) handleSessionsGridOrder(w http.ResponseWriter, r *http.Request) {
-	var req orderReq
-	_ = json.NewDecoder(r.Body).Decode(&req)
-	s.mgr.ReorderGrid(req.IDs)
 	w.WriteHeader(http.StatusNoContent)
 }
 
@@ -454,7 +511,13 @@ func (s *Server) handleWorktrees(w http.ResponseWriter, r *http.Request) {
 		if wt.IsMain {
 			name = "root"
 		}
-		out = append(out, wtInfo{Path: wt.Path, Branch: wt.Branch, Name: name, IsMain: wt.IsMain})
+		groups := []project.Group{}
+		for _, g := range proj.Groups {
+			if g.Worktree == wt.Path {
+				groups = append(groups, g)
+			}
+		}
+		out = append(out, wtInfo{Path: wt.Path, Branch: wt.Branch, Name: name, IsMain: wt.IsMain, Primary: wt.Primary, Groups: groups})
 	}
 	writeJSON(w, http.StatusOK, out)
 }
@@ -504,14 +567,7 @@ func (s *Server) handleDiff(w http.ResponseWriter, r *http.Request) {
 		http.Error(w, err.Error(), http.StatusInternalServerError)
 		return
 	}
-	valid := false
-	for _, wt := range wts {
-		if wt.Path == wtPath {
-			valid = true
-			break
-		}
-	}
-	if !valid {
+	if !hasWorktree(wts, wtPath) {
 		http.Error(w, "worktree not found in project", http.StatusBadRequest)
 		return
 	}
@@ -553,7 +609,7 @@ func (s *Server) handleAddWorktree(w http.ResponseWriter, r *http.Request) {
 		http.Error(w, err.Error(), http.StatusConflict)
 		return
 	}
-	writeJSON(w, http.StatusOK, wtInfo{Path: path, Branch: req.Branch, Name: req.Branch, IsMain: false})
+	writeJSON(w, http.StatusOK, wtInfo{Path: path, Branch: req.Branch, Name: req.Branch, IsMain: false, Groups: []project.Group{}})
 }
 
 func (s *Server) handleRemoveWorktree(w http.ResponseWriter, r *http.Request) {
@@ -580,7 +636,7 @@ func (s *Server) handleRemoveWorktree(w http.ResponseWriter, r *http.Request) {
 		http.Error(w, "worktree not found", http.StatusNotFound)
 		return
 	}
-	if target.IsMain {
+	if target.IsMain || target.Primary {
 		http.Error(w, "cannot remove the main worktree", http.StatusBadRequest)
 		return
 	}
@@ -592,5 +648,196 @@ func (s *Server) handleRemoveWorktree(w http.ResponseWriter, r *http.Request) {
 	if target.Branch != "" {
 		_ = gitwt.DeleteBranch(proj.Path, target.Branch)
 	}
+	_ = s.projects.RemoveWorktreeGroups(proj.ID, target.Path)
 	w.WriteHeader(http.StatusNoContent)
+}
+
+type emptyWt struct {
+	Path   string `json:"path"`
+	Branch string `json:"branch"`
+}
+
+// emptyWorktrees lists the project's removable worktrees whose removal loses
+// nothing: no orchid session (running or stopped) is bound to it, and git
+// reports no uncommitted/untracked changes and no commits that exist only
+// locally (see gitwt.HasWork).
+func (s *Server) emptyWorktrees(proj project.Project) ([]gitwt.Worktree, error) {
+	wts, err := gitwt.List(proj.Path)
+	if err != nil {
+		return nil, err
+	}
+	used := map[string]bool{}
+	for _, in := range s.mgr.List() {
+		used[in.Worktree] = true
+	}
+	base := gitwt.BaseRef(proj.Path, proj.BaseBranch)
+	// git status on a big repo is slow (~1s each): check candidates in parallel
+	work := make([]bool, len(wts))
+	var wg sync.WaitGroup
+	sem := make(chan struct{}, 8)
+	for i, wt := range wts {
+		if wt.IsMain || wt.Primary || used[wt.Path] {
+			work[i] = true
+			continue
+		}
+		wg.Add(1)
+		go func(i int, wt gitwt.Worktree) {
+			defer wg.Done()
+			sem <- struct{}{}
+			defer func() { <-sem }()
+			work[i] = gitwt.HasWork(proj.Path, wt.Path, wt.Branch, base)
+		}(i, wt)
+	}
+	wg.Wait()
+	var out []gitwt.Worktree
+	for i, wt := range wts {
+		if !work[i] {
+			out = append(out, wt)
+		}
+	}
+	return out, nil
+}
+
+func (s *Server) handleEmptyWorktrees(w http.ResponseWriter, r *http.Request) {
+	proj, ok := s.projects.Get(r.PathValue("id"))
+	if !ok {
+		http.Error(w, "unknown project", http.StatusNotFound)
+		return
+	}
+	wts, err := s.emptyWorktrees(proj)
+	if err != nil {
+		http.Error(w, err.Error(), http.StatusInternalServerError)
+		return
+	}
+	out := make([]emptyWt, 0, len(wts))
+	for _, wt := range wts {
+		out = append(out, emptyWt{Path: wt.Path, Branch: wt.Branch})
+	}
+	writeJSON(w, http.StatusOK, out)
+}
+
+type pruneWtReq struct {
+	Paths []string `json:"paths"`
+}
+
+// handlePruneWorktrees removes the requested worktrees (and their branches),
+// but only those that are still empty right now: the set is recomputed, so a
+// worktree that gained a session or changes since the user confirmed is kept.
+func (s *Server) handlePruneWorktrees(w http.ResponseWriter, r *http.Request) {
+	proj, ok := s.projects.Get(r.PathValue("id"))
+	if !ok {
+		http.Error(w, "unknown project", http.StatusNotFound)
+		return
+	}
+	var req pruneWtReq
+	_ = json.NewDecoder(r.Body).Decode(&req)
+	wts, err := s.emptyWorktrees(proj)
+	if err != nil {
+		http.Error(w, err.Error(), http.StatusInternalServerError)
+		return
+	}
+	want := map[string]bool{}
+	for _, p := range req.Paths {
+		want[p] = true
+	}
+	removed := []string{}
+	var errs []string
+	for _, wt := range wts {
+		if !want[wt.Path] {
+			continue
+		}
+		if err := gitwt.Remove(proj.Path, wt.Path); err != nil {
+			errs = append(errs, err.Error())
+			continue
+		}
+		_ = gitwt.DeleteBranch(proj.Path, wt.Branch)
+		_ = s.projects.RemoveWorktreeGroups(proj.ID, wt.Path)
+		removed = append(removed, wt.Path)
+	}
+	writeJSON(w, http.StatusOK, map[string]any{"removed": removed, "errors": errs})
+}
+
+func hasWorktree(wts []gitwt.Worktree, path string) bool {
+	for _, wt := range wts {
+		if wt.Path == path {
+			return true
+		}
+	}
+	return false
+}
+
+// groupIn reports whether gid is a group of proj bound to worktree.
+func groupIn(proj project.Project, gid, worktree string) bool {
+	for _, g := range proj.Groups {
+		if g.ID == gid {
+			return g.Worktree == worktree
+		}
+	}
+	return false
+}
+
+type groupReq struct {
+	Worktree string `json:"worktree"`
+	Name     string `json:"name"`
+}
+
+func (s *Server) handleAddGroup(w http.ResponseWriter, r *http.Request) {
+	proj, ok := s.projects.Get(r.PathValue("id"))
+	if !ok {
+		http.Error(w, "unknown project", http.StatusNotFound)
+		return
+	}
+	var req groupReq
+	_ = json.NewDecoder(r.Body).Decode(&req)
+	wts, err := gitwt.List(proj.Path)
+	if err != nil {
+		http.Error(w, err.Error(), http.StatusInternalServerError)
+		return
+	}
+	if !hasWorktree(wts, req.Worktree) {
+		http.Error(w, "worktree not found in project", http.StatusBadRequest)
+		return
+	}
+	g, err := s.projects.AddGroup(proj.ID, req.Worktree, req.Name)
+	if err != nil {
+		http.Error(w, err.Error(), http.StatusBadRequest)
+		return
+	}
+	writeJSON(w, http.StatusOK, g)
+}
+
+func (s *Server) handleRenameGroup(w http.ResponseWriter, r *http.Request) {
+	var req groupReq
+	_ = json.NewDecoder(r.Body).Decode(&req)
+	if strings.TrimSpace(req.Name) == "" {
+		http.Error(w, "group name is required", http.StatusBadRequest)
+		return
+	}
+	if err := s.projects.RenameGroup(r.PathValue("id"), r.PathValue("gid"), req.Name); err != nil {
+		http.Error(w, err.Error(), http.StatusNotFound)
+		return
+	}
+	w.WriteHeader(http.StatusNoContent)
+}
+
+// handleRemoveGroup deletes a group; its sessions survive, moved to ungrouped.
+func (s *Server) handleRemoveGroup(w http.ResponseWriter, r *http.Request) {
+	gid := r.PathValue("gid")
+	if err := s.projects.RemoveGroup(r.PathValue("id"), gid); err != nil {
+		http.Error(w, err.Error(), http.StatusNotFound)
+		return
+	}
+	s.mgr.Ungroup(gid)
+	w.WriteHeader(http.StatusNoContent)
+}
+
+// handleClearGroup kills every session of a group; the group itself stays.
+func (s *Server) handleClearGroup(w http.ResponseWriter, r *http.Request) {
+	proj, ok := s.projects.Get(r.PathValue("id"))
+	gid := r.PathValue("gid")
+	if !ok || !slices.ContainsFunc(proj.Groups, func(g project.Group) bool { return g.ID == gid }) {
+		http.Error(w, "group not found", http.StatusNotFound)
+		return
+	}
+	writeJSON(w, http.StatusOK, map[string]int{"killed": s.mgr.KillByGroup(gid)})
 }

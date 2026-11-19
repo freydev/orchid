@@ -32,5 +32,7 @@ commands:
   create <agent> [cwd]      create a session
   rm <id>                   delete a session
   restart <id>              restart a stopped session
+  install-service           run the daemon at login (launchd / systemd user)
+  uninstall-service         remove the login service
 `)
 }

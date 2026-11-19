@@ -2,12 +2,19 @@ package server
 
 import (
 	"io/fs"
+	"mime"
 	"net/http"
 
 	"orchid/internal/project"
 	"orchid/internal/session"
 	"orchid/web"
 )
+
+func init() {
+	// Go's default mime table lacks .webmanifest; without this the PWA manifest
+	// is served as octet-stream and some browsers reject it.
+	_ = mime.AddExtensionType(".webmanifest", "application/manifest+json")
+}
 
 type Server struct {
 	mgr      *session.Manager
@@ -59,7 +66,6 @@ func (s *Server) routes() {
 	s.mux.HandleFunc("PATCH /api/projects/{id}", s.handleUpdateProject)
 	s.mux.HandleFunc("PUT /api/projects/order", s.handleProjectsOrder)
 	s.mux.HandleFunc("PUT /api/sessions/order", s.handleSessionsOrder)
-	s.mux.HandleFunc("PUT /api/sessions/grid-order", s.handleSessionsGridOrder)
 	s.mux.HandleFunc("PUT /api/projects/{id}/worktrees/order", s.handleWorktreesOrder)
 	s.mux.HandleFunc("DELETE /api/projects/{id}", s.handleRemoveProject)
 	s.mux.HandleFunc("GET /api/projects/{id}/gitinfo", s.handleGitInfo)
@@ -67,6 +73,12 @@ func (s *Server) routes() {
 	s.mux.HandleFunc("GET /api/projects/{id}/worktrees", s.handleWorktrees)
 	s.mux.HandleFunc("POST /api/projects/{id}/worktrees", s.handleAddWorktree)
 	s.mux.HandleFunc("DELETE /api/projects/{id}/worktrees", s.handleRemoveWorktree)
+	s.mux.HandleFunc("GET /api/projects/{id}/worktrees/empty", s.handleEmptyWorktrees)
+	s.mux.HandleFunc("POST /api/projects/{id}/worktrees/prune", s.handlePruneWorktrees)
+	s.mux.HandleFunc("POST /api/projects/{id}/groups", s.handleAddGroup)
+	s.mux.HandleFunc("PATCH /api/projects/{id}/groups/{gid}", s.handleRenameGroup)
+	s.mux.HandleFunc("DELETE /api/projects/{id}/groups/{gid}", s.handleRemoveGroup)
+	s.mux.HandleFunc("POST /api/projects/{id}/groups/{gid}/clear", s.handleClearGroup)
 
 	s.mux.HandleFunc("GET /ws/{id}", s.handleWS)
 	sub, _ := fs.Sub(web.FS, "dist")

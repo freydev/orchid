@@ -1,7 +1,15 @@
 import { app, refresh } from './state.svelte';
 import { api } from './api';
 
+let graphRefresh: (() => void) | null = null;
+export function setGraphRefresh(fn: (() => void) | null) { graphRefresh = fn; }
+
 export async function pollStatus() {
+  if (app.graph) {
+    try { const list = await api.projects(); if (JSON.stringify(list) !== JSON.stringify(app.projects)) app.projects = list; } catch {}
+    graphRefresh?.();
+    return;
+  }
   if (!app.cur.projectId) {
     try { const list = await api.projects(); if (JSON.stringify(list) !== JSON.stringify(app.projects)) app.projects = list; } catch {}
     return;

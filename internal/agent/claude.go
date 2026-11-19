@@ -15,10 +15,18 @@ func withPluginDir(argv []string) []string {
 	return argv
 }
 
-func (claudeAgent) NewCommand(cwd, agentSessionID string) []string {
-	return withPluginDir([]string{"claude", "--session-id", agentSessionID})
+// withSkipPerms appends --dangerously-skip-permissions when opts ask for it.
+func withSkipPerms(argv []string, opts Options) []string {
+	if opts.SkipPermissions {
+		return append(argv, "--dangerously-skip-permissions")
+	}
+	return argv
 }
 
-func (claudeAgent) ResumeCommand(cwd, agentSessionID string) []string {
-	return withPluginDir([]string{"claude", "--resume", agentSessionID})
+func (claudeAgent) NewCommand(cwd, agentSessionID string, opts Options) []string {
+	return withSkipPerms(withPluginDir([]string{"claude", "--session-id", agentSessionID}), opts)
+}
+
+func (claudeAgent) ResumeCommand(cwd, agentSessionID string, opts Options) []string {
+	return withSkipPerms(withPluginDir([]string{"claude", "--resume", agentSessionID}), opts)
 }

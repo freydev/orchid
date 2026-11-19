@@ -23,6 +23,7 @@ import (
 	"orchid/internal/config"
 	"orchid/internal/gitwt"
 	"orchid/internal/mcp"
+	"orchid/internal/notify"
 	"orchid/internal/project"
 	"orchid/internal/runtime"
 	"orchid/internal/server"
@@ -30,6 +31,7 @@ import (
 	"orchid/internal/statusclient"
 	"orchid/internal/store"
 	"orchid/internal/tmux"
+	"orchid/internal/wake"
 )
 
 // route maps args to a handler returning an exit code. The first arg selects the
@@ -64,6 +66,10 @@ func route(args []string) (func() int, error) {
 		return func() int { return notifyCmd(rest) }, nil
 	case "mcp":
 		return func() int { return mcpCmd(rest) }, nil
+	case "install-service":
+		return func() int { return installServiceCmd(rest) }, nil
+	case "uninstall-service":
+		return func() int { return uninstallServiceCmd(rest) }, nil
 	default:
 		return nil, fmt.Errorf("unknown command %q", args[0])
 	}
@@ -192,7 +198,8 @@ func serveCmd(args []string) int {
 	if n := mgr.PruneOrphanTmux(); n > 0 {
 		log.Printf("orchid: pruned %d orphan tmux session(s) not in sessions.json", n)
 	}
-	mgr.SyncTitles() // backfill claude session titles at startup
+	mgr.SyncTitles()  // backfill claude session titles at startup
+	go notify.Prime() // build/register the macOS notification source off the hot path
 	handler := server.New(mgr, ps)
 	handler.SetRuntime(self, host, port)
 	srv := &http.Server{Addr: addr, Handler: handler}
@@ -204,6 +211,9 @@ func serveCmd(args []string) int {
 		_ = srv.Shutdown(context.Background())
 	}()
 
+	go reapIdleLoop(ctx, mgr)
+	go keepAwakeLoop(ctx, mgr)
+
 	log.Printf("orchid listening on http://%s (sessions: %s)", addr, sessionsPath())
 	err = srv.ListenAndServe()
 	mgr.KillAll()
@@ -212,6 +222,51 @@ func serveCmd(args []string) int {
 		return 1
 	}
 	return 0
+}
+
+// reapIdleLoop periodically stops sessions that have gone idle, so their agent
+// and MCP processes don't accumulate for the lifetime of the daemon. The
+// timeout is re-read every tick, so a settings change applies without a
+// restart; a negative idle_timeout_min disables reaping entirely.
+func reapIdleLoop(ctx context.Context, mgr *session.Manager) {
+	t := time.NewTicker(time.Minute)
+	defer t.Stop()
+	for {
+		select {
+		case <-ctx.Done():
+			return
+		case <-t.C:
+			if ids := mgr.ReapIdle(config.IdleTimeout()); len(ids) > 0 {
+				log.Printf("orchid: stopped %d idle session(s): %s", len(ids), strings.Join(ids, " "))
+			}
+		}
+	}
+}
+
+// keepAwakeLoop prevents idle system sleep while at least one agent session
+// (anything but a plain shell) is running, and releases it once none are.
+func keepAwakeLoop(ctx context.Context, mgr *session.Manager) {
+	k := wake.New()
+	defer k.Set(false)
+	t := time.NewTicker(10 * time.Second)
+	defer t.Stop()
+	for {
+		k.Set(anyAgentRunning(mgr.List()))
+		select {
+		case <-ctx.Done():
+			return
+		case <-t.C:
+		}
+	}
+}
+
+func anyAgentRunning(list []session.Info) bool {
+	for _, s := range list {
+		if s.Agent != "shell" && s.Status == "running" {
+			return true
+		}
+	}
+	return false
 }
 
 func startCmd(args []string) int {

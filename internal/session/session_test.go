@@ -21,7 +21,7 @@ func newTestSession(t *testing.T, id string) *Session {
 	_ = tmux.KillSession(name)
 	rec := store.Record{ID: id, Agent: "shell", Cwd: "/tmp", Tmux: name, Status: "running"}
 	sh, _ := agent.Get("shell")
-	s, err := createSession(rec, sh.NewCommand(rec.Cwd, rec.AgentSessionID), nil, nil)
+	s, err := createSession(rec, sh.NewCommand(rec.Cwd, rec.AgentSessionID, agent.Options{}), nil, nil)
 	if err != nil {
 		t.Fatalf("createSession: %v", err)
 	}
@@ -92,16 +92,30 @@ func TestSessionAttachReceivesOutput(t *testing.T) {
 	}
 }
 
-func TestSessionAttachKicksPrevious(t *testing.T) {
+func TestSessionMultipleAttachments(t *testing.T) {
 	s := newTestSession(t, "test4")
 
 	a1 := s.Attach()
-	a2 := s.Attach() // should kick a1
+	a2 := s.Attach() // both stay live (multiple windows)
 
+	// a1 must NOT be kicked when a2 attaches.
 	select {
-	case <-a1.done: // expected
-	case <-time.After(2 * time.Second):
-		t.Fatal("previous attachment was not kicked")
+	case <-a1.done:
+		t.Fatal("first attachment was kicked; multiple should coexist")
+	case <-time.After(200 * time.Millisecond):
 	}
+
+	// detaching a2 leaves a1 live.
 	s.Detach(a2)
+	select {
+	case <-a2.done: // expected
+	case <-time.After(2 * time.Second):
+		t.Fatal("detached attachment was not closed")
+	}
+	select {
+	case <-a1.done:
+		t.Fatal("detaching one closed the other")
+	case <-time.After(200 * time.Millisecond):
+	}
+	s.Detach(a1)
 }

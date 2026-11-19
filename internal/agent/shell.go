@@ -89,11 +89,11 @@ func AvailableShells() []string {
 	return out
 }
 
-func (shellAgent) NewCommand(cwd, agentSessionID string) []string {
+func (shellAgent) NewCommand(cwd, agentSessionID string, _ Options) []string {
 	return []string{ShellPath()}
 }
 
 // ResumeCommand returns nil: a shell has no session to resume.
-func (shellAgent) ResumeCommand(cwd, agentSessionID string) []string {
+func (shellAgent) ResumeCommand(cwd, agentSessionID string, _ Options) []string {
 	return nil
 }

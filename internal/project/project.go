@@ -39,6 +39,16 @@ type Project struct {
 	// WorktreeOrder is the user's preferred display order of worktree paths.
 	// Worktrees absent from this list sort after, in git order.
 	WorktreeOrder []string `json:"worktree_order,omitempty"`
+	// Groups are user-named session groups, each scoped to one worktree.
+	// They are removed only explicitly (or with their worktree / project).
+	Groups []Group `json:"groups,omitempty"`
+}
+
+// Group is a user-named bucket of sessions inside one worktree.
+type Group struct {
+	ID       string `json:"id"`
+	Name     string `json:"name"`
+	Worktree string `json:"worktree"` // abs worktree path
 }
 
 // Store is the persisted set of projects.
@@ -93,10 +103,32 @@ func (s *Store) Get(id string) (Project, bool) {
 	return Project{}, false
 }
 
+// resolvePath turns a user-entered path into an absolute one, resolved
+// globally: a leading "~" expands to the user's home, and a relative path is
+// taken against the home directory — NOT the daemon's working directory (which
+// is wherever `orchid serve` happened to start).
+func resolvePath(path string) (string, error) {
+	path = strings.TrimSpace(path)
+	home, herr := os.UserHomeDir()
+	if path == "~" || strings.HasPrefix(path, "~/") {
+		if herr != nil {
+			return "", herr
+		}
+		path = filepath.Join(home, strings.TrimPrefix(path, "~"))
+	}
+	if !filepath.IsAbs(path) {
+		if herr != nil {
+			return filepath.Abs(path) // fall back to CWD only if home is unknown
+		}
+		path = filepath.Join(home, path)
+	}
+	return filepath.Clean(path), nil
+}
+
 // Add registers a git repository. The path must contain a .git entry. A path
 // already registered returns the existing project (idempotent).
 func (s *Store) Add(name, path string) (Project, error) {
-	abs, err := filepath.Abs(path)
+	abs, err := resolvePath(path)
 	if err != nil {
 		return Project{}, err
 	}
@@ -188,6 +220,89 @@ func (s *Store) SetWorktreeOrder(id string, paths []string) error {
 		}
 	}
 	return fmt.Errorf("project %q not found", id)
+}
+
+// AddGroup creates a named group in a project's worktree.
+func (s *Store) AddGroup(id, worktree, name string) (Group, error) {
+	name = strings.TrimSpace(name)
+	if name == "" {
+		return Group{}, fmt.Errorf("group name is required")
+	}
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	p := s.findLocked(id)
+	if p == nil {
+		return Group{}, fmt.Errorf("project %q not found", id)
+	}
+	g := Group{ID: "g-" + newID()[2:], Name: name, Worktree: worktree}
+	p.Groups = append(p.Groups, g)
+	return g, s.saveLocked()
+}
+
+// RenameGroup sets a group's name (must be non-empty).
+func (s *Store) RenameGroup(id, gid, name string) error {
+	name = strings.TrimSpace(name)
+	if name == "" {
+		return fmt.Errorf("group name is required")
+	}
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	p := s.findLocked(id)
+	if p == nil {
+		return fmt.Errorf("project %q not found", id)
+	}
+	for i := range p.Groups {
+		if p.Groups[i].ID == gid {
+			// copy-on-write: List/Get callers may hold the old slice
+			p.Groups = append([]Group(nil), p.Groups...)
+			p.Groups[i].Name = name
+			return s.saveLocked()
+		}
+	}
+	return fmt.Errorf("group %q not found", gid)
+}
+
+// RemoveGroup deletes one group. Its sessions are not touched here.
+func (s *Store) RemoveGroup(id, gid string) error {
+	return s.dropGroups(id, func(g Group) bool { return g.ID == gid }, true)
+}
+
+// RemoveWorktreeGroups deletes every group bound to a worktree path.
+func (s *Store) RemoveWorktreeGroups(id, worktree string) error {
+	return s.dropGroups(id, func(g Group) bool { return g.Worktree == worktree }, false)
+}
+
+func (s *Store) dropGroups(id string, match func(Group) bool, mustFind bool) error {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	p := s.findLocked(id)
+	if p == nil {
+		return fmt.Errorf("project %q not found", id)
+	}
+	kept := p.Groups[:0:0]
+	for _, g := range p.Groups {
+		if !match(g) {
+			kept = append(kept, g)
+		}
+	}
+	if len(kept) == len(p.Groups) {
+		if mustFind {
+			return fmt.Errorf("group not found")
+		}
+		return nil
+	}
+	p.Groups = kept
+	return s.saveLocked()
+}
+
+// findLocked returns a pointer into s.projects. Caller holds s.mu.
+func (s *Store) findLocked(id string) *Project {
+	for i := range s.projects {
+		if s.projects[i].ID == id {
+			return &s.projects[i]
+		}
+	}
+	return nil
 }
 
 func (s *Store) Remove(id string) error {

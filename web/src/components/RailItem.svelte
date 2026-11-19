@@ -43,6 +43,9 @@
   .rail-item { display: flex; align-items: center; gap: 9px; padding: 9px 10px; border-radius: var(--radius-sm); cursor: pointer; transition: background .1s; }
   .rail-item:hover { background: var(--surface-2); }
   .rail-item.active { background: var(--accent-bg); }
+  .rail-item[style*="--scol"] { border-left: 3px solid var(--scol); padding-left: 7px; background: linear-gradient(90deg, color-mix(in srgb, var(--scol) 22%, transparent), transparent 160px); }
+  .rail-item[style*="--scol"]:hover { background: linear-gradient(90deg, color-mix(in srgb, var(--scol) 28%, transparent), transparent 180px), var(--surface-2); }
+  .rail-item[style*="--scol"].active { background: linear-gradient(90deg, color-mix(in srgb, var(--scol) 34%, transparent), transparent 190px), var(--surface-2); }
   .rail-item .meta { flex: 1; min-width: 0; }
   .rail-item .sname { font-size: 12.5px; font-weight: 500; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
   .rail-item .stype { font-family: var(--mono); font-size: 10px; color: var(--text-faint); }
@@ -55,12 +58,17 @@
   .dot.idle { background: var(--idle); }
   .dot.stopped { background: #3a3a42; }
   .dot.wait { background: var(--wait); }
-  .dot.pulse { animation: pulse 1.3s ease-in-out infinite; }
+  /* composited-only (transform/opacity): box-shadow pulse repainted every frame */
+  .dot.pulse { position: relative; animation: pulse 1.3s ease-in-out infinite; }
   .dot.ok.pulse { color: var(--ok); }
   .dot.wait.pulse { color: var(--wait); }
-  @keyframes pulse {
-    0%   { box-shadow: 0 0 0 0 color-mix(in srgb, currentColor 65%, transparent); transform: scale(1); }
-    50%  { box-shadow: 0 0 0 5px color-mix(in srgb, currentColor 10%, transparent); transform: scale(1.35); }
-    100% { box-shadow: 0 0 0 8px transparent; transform: scale(1); }
+  .dot.pulse::after {
+    content: ''; position: absolute; inset: 0; border-radius: 50%;
+    background: currentColor; animation: pulse-ring 1.3s ease-out infinite;
+  }
+  @keyframes pulse { 50% { transform: scale(1.35); } }
+  @keyframes pulse-ring {
+    0%   { transform: scale(1); opacity: .65; }
+    100% { transform: scale(3); opacity: 0; }
   }
 </style>
